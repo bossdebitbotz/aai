@@ -120,14 +120,35 @@ Where $w_o = 0.01$ is the regularization weight.
 | Spacetime | 0.0122 | 0.1425 | 0.0025 | 0.0105 | 0.5774 | 0.0123 |
 | Compound (ours) | 0.0019 | 0.1361 | 0.0025 | 0.0105 | 0.1409 | 0.0079 |
 
+### Selected Models for Implementation
+
+Based on performance metrics, we will implement the following models:
+
+1. **Primary Model: Compound Attention Model**
+   - Best overall performance with lowest total loss
+   - Superior structure preservation (lowest structure loss)
+   - Comparable accuracy to LSTM with better generalization
+
+2. **Backup/Benchmark Models**:
+   - **LSTM**: For comparison and fallback
+   - **Linear**: As a simple baseline
+
+3. **Multi-Exchange Extension**:
+   - Extended Compound Attention Model with exchange embeddings
+   - Cross-exchange attention mechanism to capture inter-market dynamics
+
 ## Implementation Notes
 
 ### Key Libraries for Implementation
 
-- TensorFlow or PyTorch for neural network implementation
-- pandas for data manipulation
-- numpy for numerical operations
-- matplotlib for visualization
+- **PyTorch** (primary) for neural network implementation
+  - Better support for custom attention mechanisms
+  - More flexible for research experimentation
+  - Superior C++ integration via TorchScript
+- **pandas** for data manipulation
+- **numpy** for numerical operations
+- **matplotlib** and **plotly** for visualization
+- **pybind11** for C++/Python integration
 
 ### Multi-level LOB Structure Constraints
 
