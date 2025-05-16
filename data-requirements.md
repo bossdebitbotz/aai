@@ -184,3 +184,196 @@ The data pipeline should be implemented in C++ for performance, with the followi
    - Disk usage tracking
    - Compression ratio monitoring
    - Read/write performance metrics
+
+## Additional Requirements
+
+### Symbol Selection and Coverage
+
+1. **Trading Pair Selection Criteria**:
+   - Minimum daily volume requirements (>$50M)
+   - Maximum spread thresholds (<0.05%)
+   - Sufficient historical data availability (>6 months)
+   - Consistent 24/7 trading activity
+
+2. **Symbol Management**:
+   - Quarterly review of symbol inclusion/exclusion
+   - Procedure for adding new symbols (2-week observation period)
+   - Gradual phase-out for removed symbols (maintain data collection for 1 month)
+   - Primary focus on BTC, ETH, and top 10 altcoins by market cap
+
+3. **Model Allocation Strategy**:
+   - Tier 1 symbols: Individual dedicated models
+   - Tier 2 symbols: Grouped models by correlation clusters
+   - All symbols: Inclusion in global market model
+
+### Hardware Storage Requirements
+
+1. **Data Volume Estimates**:
+   - Raw LOB data: ~2GB per symbol per day
+   - Processed features: ~500MB per symbol per day
+   - Model checkpoints: ~200MB per model version
+   - Total annual requirement: ~1TB per symbol
+
+2. **Retention Policies**:
+   - Raw data: 30 days online storage, 1 year archived
+   - Processed features: 90 days online, 2 years archived
+   - Training datasets: Permanent storage with versioning
+   - Model artifacts: All versions retained indefinitely
+
+3. **Backup Procedures**:
+   - Daily incremental backups of all data
+   - Weekly full backups to off-site storage
+   - Monthly verification of backup integrity
+   - Disaster recovery testing quarterly
+
+### Data Validation Rules
+
+1. **Price Validation**:
+   - Valid range: ±30% of 24h moving average
+   - Maximum allowed gap between levels: 5% for normal markets
+   - Cross-exchange price deviation alerts: >1% for major pairs
+
+2. **Volume Validation**:
+   - Minimum volume thresholds per level
+   - Maximum allowed sudden changes: 500% increase/90% decrease
+   - Zero-volume level detection and handling
+
+3. **Structural Validation**:
+   - Bid/ask crossing detection
+   - Level inversion detection
+   - Timestamp sequence validation
+   - Order book depth consistency checks
+
+4. **Automated Data Quality Scoring**:
+   - Completeness score (% of expected data points)
+   - Accuracy score (based on validation rules)
+   - Consistency score (temporal stability of features)
+   - Overall quality score with minimum threshold for model inclusion
+
+### Exchange-Specific Considerations
+
+1. **API Limitations**:
+   - Binance: 1200 requests/minute per IP
+   - Bybit: 120 requests/minute per IP
+   - Connection pooling requirements
+   - IP rotation strategy for high-frequency collection
+
+2. **Order Book Representation Differences**:
+   - Binance: Price level aggregation method
+   - Bybit: Treatment of hidden liquidity
+   - Normalization procedures for each exchange
+
+3. **Exchange-Specific Data Quirks**:
+   - Binance: Handling of iceberg/hidden orders
+   - Bybit: Market maker protection mechanisms
+   - Maintenance window patterns and handling
+
+4. **Authentication and Security**:
+   - API key rotation schedule
+   - IP whitelisting requirements
+   - Secure credential storage
+
+### Latency Measurement
+
+1. **Latency Metrics**:
+   - Exchange-to-server latency (ping time)
+   - Data processing latency (receipt to storage)
+   - End-to-end latency (exchange event to feature availability)
+   - Clock synchronization methodology
+
+2. **Latency Thresholds**:
+   - Critical threshold: >500ms for any component
+   - Warning threshold: >200ms for any component
+   - Target average: <100ms end-to-end
+
+3. **High-Latency Procedures**:
+   - Automated fallback to secondary data sources
+   - Graceful degradation of feature complexity
+   - Circuit breaker implementation for extreme cases
+
+### Market Hours Handling
+
+1. **Exchange Maintenance Periods**:
+   - Scheduled maintenance detection
+   - Data gap annotation
+   - Model inference adjustment during maintenance
+
+2. **Market Volatility Events**:
+   - Circuit breaker detection
+   - Flash crash identification
+   - Special handling of post-halt data
+
+3. **Daily Cycle Management**:
+   - UTC day boundary handling
+   - Weekend vs. weekday pattern differences
+   - Trading session open/close effects
+
+### Data Versioning
+
+1. **Dataset Versioning Schema**:
+   - Major.Minor.Patch format
+   - Major: Significant feature changes
+   - Minor: New symbols or exchanges
+   - Patch: Bug fixes or small improvements
+
+2. **Version Control Integration**:
+   - Git LFS for feature datasets
+   - Metadata storage with each version
+   - Compatibility matrix with model versions
+
+3. **Model-Data Relationship**:
+   - Explicit mapping of model versions to data versions
+   - Automated compatibility checking
+   - Version dependency documentation
+
+### Legal and Compliance
+
+1. **Exchange Terms Compliance**:
+   - Documentation of relevant TOS sections
+   - Rate limiting compliance
+   - Commercial usage restrictions
+
+2. **Data Retention Requirements**:
+   - Exchange-specific data retention policies
+   - Regulatory considerations by jurisdiction
+   - GDPR compliance (if applicable)
+
+3. **Audit Trail**:
+   - Complete logging of data access
+   - Immutable record of data transformations
+   - Chain of custody documentation
+
+### Correlation Analysis Requirements
+
+1. **Cross-Exchange Correlation Metrics**:
+   - Price correlation coefficients (Pearson, Spearman)
+   - Volume imbalance correlation
+   - Spread correlation
+   - Lead-lag relationship measurements
+
+2. **Correlation Storage**:
+   - Time-series database for correlation metrics
+   - Correlation matrix snapshots (hourly)
+   - Long-term correlation trend storage
+
+3. **Correlation Monitoring**:
+   - Sudden correlation breakdown alerts
+   - Correlation regime change detection
+   - Visualization of correlation networks
+
+### Feature Stability Monitoring
+
+1. **Feature Drift Detection**:
+   - Kullback-Leibler divergence monitoring
+   - Statistical distribution tests (daily)
+   - Feature importance stability metrics
+
+2. **Retraining Triggers**:
+   - Automatic: Feature drift exceeding thresholds
+   - Scheduled: Monthly regardless of drift
+   - Manual: After significant market regime changes
+
+3. **Feature Evolution Tracking**:
+   - Historical feature distribution archives
+   - Feature correlation stability metrics
+   - Documentation of feature definition changes
