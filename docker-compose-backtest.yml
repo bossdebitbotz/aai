@@ -1,0 +1,352 @@
+services:
+  timescaledb_backtest1:
+    image: timescale/timescaledb:latest-pg14
+    container_name: timescaledb_backtest1
+    environment:
+      - POSTGRES_USER=backtest_user
+      - POSTGRES_PASSWORD=backtest_password
+      - POSTGRES_DB=backtest_db
+      # Connection settings
+      - POSTGRESQL_MAX_CONNECTIONS=100
+      - POSTGRESQL_SHARED_BUFFERS=1GB
+      - POSTGRESQL_EFFECTIVE_CACHE_SIZE=3GB
+      - POSTGRESQL_WORK_MEM=64MB
+      - POSTGRESQL_MAINTENANCE_WORK_MEM=256MB
+      # Data handling settings
+      - POSTGRESQL_MAX_PREPARED_TRANSACTIONS=64
+      - POSTGRESQL_MAX_STACK_DEPTH=7680
+      - POSTGRESQL_COMMIT_DELAY=1000
+      - POSTGRESQL_COMMIT_SIBLINGS=5
+      # Large object settings
+      - POSTGRESQL_TEMP_BUFFERS=16MB
+      - POSTGRESQL_MAX_FILES_PER_PROCESS=1000
+      - POSTGRESQL_VACUUM_COST_DELAY=20
+      - POSTGRESQL_STATEMENT_TIMEOUT=0
+      - POSTGRESQL_IDLE_IN_TRANSACTION_SESSION_TIMEOUT=0
+    ports:
+      - "5433:5432"
+    volumes:
+      - timescale_backtest_data1:/var/lib/postgresql/data
+    restart: unless-stopped
+    shm_size: '2gb'  # Increase shared memory
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+        reservations:
+          memory: 2G
+          cpus: '1'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U backtest_user -d backtest_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  timescaledb_backtest2:
+    image: timescale/timescaledb:latest-pg14
+    container_name: timescaledb_backtest2
+    environment:
+      - POSTGRES_USER=backtest_user
+      - POSTGRES_PASSWORD=backtest_password
+      - POSTGRES_DB=backtest_db
+      # Connection settings
+      - POSTGRESQL_MAX_CONNECTIONS=100
+      - POSTGRESQL_SHARED_BUFFERS=1GB
+      - POSTGRESQL_EFFECTIVE_CACHE_SIZE=3GB
+      - POSTGRESQL_WORK_MEM=64MB
+      - POSTGRESQL_MAINTENANCE_WORK_MEM=256MB
+      # Data handling settings
+      - POSTGRESQL_MAX_PREPARED_TRANSACTIONS=64
+      - POSTGRESQL_MAX_STACK_DEPTH=7680
+      - POSTGRESQL_COMMIT_DELAY=1000
+      - POSTGRESQL_COMMIT_SIBLINGS=5
+      # Large object settings
+      - POSTGRESQL_TEMP_BUFFERS=16MB
+      - POSTGRESQL_MAX_FILES_PER_PROCESS=1000
+      - POSTGRESQL_VACUUM_COST_DELAY=20
+      - POSTGRESQL_STATEMENT_TIMEOUT=0
+      - POSTGRESQL_IDLE_IN_TRANSACTION_SESSION_TIMEOUT=0
+    ports:
+      - "5434:5432"
+    volumes:
+      - timescale_backtest_data2:/var/lib/postgresql/data
+    restart: unless-stopped
+    shm_size: '2gb'  # Increase shared memory
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+        reservations:
+          memory: 2G
+          cpus: '1'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U backtest_user -d backtest_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  timescaledb_backtest3:
+    image: timescale/timescaledb:latest-pg14
+    container_name: timescaledb_backtest3
+    environment:
+      - POSTGRES_USER=backtest_user
+      - POSTGRES_PASSWORD=backtest_password
+      - POSTGRES_DB=backtest_db
+      # Connection settings
+      - POSTGRESQL_MAX_CONNECTIONS=100
+      - POSTGRESQL_SHARED_BUFFERS=1GB
+      - POSTGRESQL_EFFECTIVE_CACHE_SIZE=3GB
+      - POSTGRESQL_WORK_MEM=64MB
+      - POSTGRESQL_MAINTENANCE_WORK_MEM=256MB
+      # Data handling settings
+      - POSTGRESQL_MAX_PREPARED_TRANSACTIONS=64
+      - POSTGRESQL_MAX_STACK_DEPTH=7680
+      - POSTGRESQL_COMMIT_DELAY=1000
+      - POSTGRESQL_COMMIT_SIBLINGS=5
+      # Large object settings
+      - POSTGRESQL_TEMP_BUFFERS=16MB
+      - POSTGRESQL_MAX_FILES_PER_PROCESS=1000
+      - POSTGRESQL_VACUUM_COST_DELAY=20
+      - POSTGRESQL_STATEMENT_TIMEOUT=0
+      - POSTGRESQL_IDLE_IN_TRANSACTION_SESSION_TIMEOUT=0
+    ports:
+      - "5435:5432"
+    volumes:
+      - timescale_backtest_data3:/var/lib/postgresql/data
+    restart: unless-stopped
+    shm_size: '2gb'  # Increase shared memory
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+        reservations:
+          memory: 2G
+          cpus: '1'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U backtest_user -d backtest_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  timescaledb_backtest4:
+    image: timescale/timescaledb:latest-pg14
+    container_name: timescaledb_backtest4
+    environment:
+      - POSTGRES_USER=backtest_user
+      - POSTGRES_PASSWORD=backtest_password
+      - POSTGRES_DB=backtest_db
+      # Connection settings
+      - POSTGRESQL_MAX_CONNECTIONS=100
+      - POSTGRESQL_SHARED_BUFFERS=1GB
+      - POSTGRESQL_EFFECTIVE_CACHE_SIZE=3GB
+      - POSTGRESQL_WORK_MEM=64MB
+      - POSTGRESQL_MAINTENANCE_WORK_MEM=256MB
+      # Data handling settings
+      - POSTGRESQL_MAX_PREPARED_TRANSACTIONS=64
+      - POSTGRESQL_MAX_STACK_DEPTH=7680
+      - POSTGRESQL_COMMIT_DELAY=1000
+      - POSTGRESQL_COMMIT_SIBLINGS=5
+      # Large object settings
+      - POSTGRESQL_TEMP_BUFFERS=16MB
+      - POSTGRESQL_MAX_FILES_PER_PROCESS=1000
+      - POSTGRESQL_VACUUM_COST_DELAY=20
+      - POSTGRESQL_STATEMENT_TIMEOUT=0
+      - POSTGRESQL_IDLE_IN_TRANSACTION_SESSION_TIMEOUT=0
+    ports:
+      - "5436:5432"
+    volumes:
+      - timescale_backtest_data4:/var/lib/postgresql/data
+    restart: unless-stopped
+    shm_size: '2gb'  # Increase shared memory
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+        reservations:
+          memory: 2G
+          cpus: '1'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U backtest_user -d backtest_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  timescaledb_backtest5:
+    image: timescale/timescaledb:latest-pg14
+    container_name: timescaledb_backtest5
+    environment:
+      - POSTGRES_USER=backtest_user
+      - POSTGRES_PASSWORD=backtest_password
+      - POSTGRES_DB=backtest_db
+      # Connection settings
+      - POSTGRESQL_MAX_CONNECTIONS=100
+      - POSTGRESQL_SHARED_BUFFERS=1GB
+      - POSTGRESQL_EFFECTIVE_CACHE_SIZE=3GB
+      - POSTGRESQL_WORK_MEM=64MB
+      - POSTGRESQL_MAINTENANCE_WORK_MEM=256MB
+      # Data handling settings
+      - POSTGRESQL_MAX_PREPARED_TRANSACTIONS=64
+      - POSTGRESQL_MAX_STACK_DEPTH=7680
+      - POSTGRESQL_COMMIT_DELAY=1000
+      - POSTGRESQL_COMMIT_SIBLINGS=5
+      # Large object settings
+      - POSTGRESQL_TEMP_BUFFERS=16MB
+      - POSTGRESQL_MAX_FILES_PER_PROCESS=1000
+      - POSTGRESQL_VACUUM_COST_DELAY=20
+      - POSTGRESQL_STATEMENT_TIMEOUT=0
+      - POSTGRESQL_IDLE_IN_TRANSACTION_SESSION_TIMEOUT=0
+    ports:
+      - "5437:5432"
+    volumes:
+      - timescale_backtest_data5:/var/lib/postgresql/data
+    restart: unless-stopped
+    shm_size: '2gb'  # Increase shared memory
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+        reservations:
+          memory: 2G
+          cpus: '1'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U backtest_user -d backtest_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  timescaledb_backtest6:
+    image: timescale/timescaledb:latest-pg14
+    container_name: timescaledb_backtest6
+    environment:
+      - POSTGRES_USER=backtest_user
+      - POSTGRES_PASSWORD=backtest_password
+      - POSTGRES_DB=backtest_db
+      # Connection settings
+      - POSTGRESQL_MAX_CONNECTIONS=100
+      - POSTGRESQL_SHARED_BUFFERS=1GB
+      - POSTGRESQL_EFFECTIVE_CACHE_SIZE=3GB
+      - POSTGRESQL_WORK_MEM=64MB
+      - POSTGRESQL_MAINTENANCE_WORK_MEM=256MB
+      # Data handling settings
+      - POSTGRESQL_MAX_PREPARED_TRANSACTIONS=64
+      - POSTGRESQL_MAX_STACK_DEPTH=7680
+      - POSTGRESQL_COMMIT_DELAY=1000
+      - POSTGRESQL_COMMIT_SIBLINGS=5
+      # Large object settings
+      - POSTGRESQL_TEMP_BUFFERS=16MB
+      - POSTGRESQL_MAX_FILES_PER_PROCESS=1000
+      - POSTGRESQL_VACUUM_COST_DELAY=20
+      - POSTGRESQL_STATEMENT_TIMEOUT=0
+      - POSTGRESQL_IDLE_IN_TRANSACTION_SESSION_TIMEOUT=0
+    ports:
+      - "5438:5432"
+    volumes:
+      - timescale_backtest_data6:/var/lib/postgresql/data
+    restart: unless-stopped
+    shm_size: '2gb'  # Increase shared memory
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+        reservations:
+          memory: 2G
+          cpus: '1'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U backtest_user -d backtest_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  timescaledb_backtest7:
+    image: timescale/timescaledb:latest-pg14
+    container_name: timescaledb_backtest7
+    environment:
+      - POSTGRES_USER=backtest_user
+      - POSTGRES_PASSWORD=backtest_password
+      - POSTGRES_DB=backtest_db
+      # Connection settings
+      - POSTGRESQL_MAX_CONNECTIONS=100
+      - POSTGRESQL_SHARED_BUFFERS=1GB
+      - POSTGRESQL_EFFECTIVE_CACHE_SIZE=3GB
+      - POSTGRESQL_WORK_MEM=64MB
+      - POSTGRESQL_MAINTENANCE_WORK_MEM=256MB
+      # Data handling settings
+      - POSTGRESQL_MAX_PREPARED_TRANSACTIONS=64
+      - POSTGRESQL_MAX_STACK_DEPTH=7680
+      - POSTGRESQL_COMMIT_DELAY=1000
+      - POSTGRESQL_COMMIT_SIBLINGS=5
+      # Large object settings
+      - POSTGRESQL_TEMP_BUFFERS=16MB
+      - POSTGRESQL_MAX_FILES_PER_PROCESS=1000
+      - POSTGRESQL_VACUUM_COST_DELAY=20
+      - POSTGRESQL_STATEMENT_TIMEOUT=0
+      - POSTGRESQL_IDLE_IN_TRANSACTION_SESSION_TIMEOUT=0
+    ports:
+      - "5439:5432"
+    volumes:
+      - timescale_backtest_data7:/var/lib/postgresql/data
+    restart: unless-stopped
+    shm_size: '2gb'  # Increase shared memory
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+        reservations:
+          memory: 2G
+          cpus: '1'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U backtest_user -d backtest_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  timescale_backtest_data1:
+    driver: local
+  timescale_backtest_data2:
+    driver: local
+  timescale_backtest_data3:
+    driver: local
+  timescale_backtest_data4:
+    driver: local
+  timescale_backtest_data5:
+    driver: local
+  timescale_backtest_data6:
+    driver: local
+  timescale_backtest_data7:
+    driver: local
