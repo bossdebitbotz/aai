@@ -31,6 +31,7 @@ import pyarrow.parquet as pq
 import os
 from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
+import random
 
 # Set up logging
 logging.basicConfig(
@@ -51,7 +52,7 @@ BYBIT_SPOT_WS_URL = "wss://stream.bybit.com/v5/public/spot"
 # Database configuration
 DB_CONFIG = {
     'host': 'localhost',
-    'port': 5432,
+    'port': 5433,
     'user': 'backtest_user',
     'password': 'backtest_password',
     'database': 'backtest_db'
@@ -398,7 +399,11 @@ async def binance_spot_websocket_manager(trading_pairs):
     }
     
     retry_count = 0
-    while running and retry_count < 5:
+    max_retries = 10
+    base_delay = 5
+    max_delay = 300  # 5 minutes
+    
+    while running and retry_count < max_retries:
         try:
             logger.info(f"Connecting to Binance Spot WebSocket for {', '.join(trading_pairs)}...")
             
@@ -412,7 +417,15 @@ async def binance_spot_websocket_manager(trading_pairs):
                     logger.error(f"Failed to initialize order book for Binance Spot {pair}")
             
             # Connect to WebSocket
-            async with websockets.connect(BINANCE_SPOT_WS_URL) as websocket:
+            async with websockets.connect(
+                BINANCE_SPOT_WS_URL,
+                ping_interval=20,  # Send ping every 20 seconds
+                ping_timeout=30,   # Wait 30 seconds for pong response
+                close_timeout=10   # Wait 10 seconds for close response
+            ) as websocket:
+                # Reset retry count on successful connection
+                retry_count = 0
+                
                 # Subscribe to streams
                 await websocket.send(json.dumps(payload))
                 
@@ -452,13 +465,25 @@ async def binance_spot_websocket_manager(trading_pairs):
                         except:
                             logger.warning("Binance Spot WebSocket connection lost, reconnecting...")
                             break
+                    except websockets.exceptions.ConnectionClosedError as e:
+                        logger.warning(f"Binance Spot WebSocket connection closed: {e}")
+                        # Exit the inner loop to trigger reconnection
+                        break
                     except Exception as e:
                         logger.error(f"Error processing Binance Spot WebSocket message: {type(e).__name__} - {str(e)}")
+                        if isinstance(e, websockets.exceptions.WebSocketException):
+                            break
         
         except Exception as e:
             logger.error(f"Binance Spot WebSocket connection error: {type(e).__name__} - {str(e)}")
             retry_count += 1
-            await asyncio.sleep(5)
+            # Calculate exponential backoff delay with jitter
+            delay = min(max_delay, base_delay * (2 ** (retry_count - 1))) * (0.8 + 0.4 * random.random())
+            logger.info(f"Reconnecting in {delay:.2f} seconds (retry {retry_count}/{max_retries})...")
+            await asyncio.sleep(delay)
+    
+    if retry_count >= max_retries:
+        logger.error(f"Max retries reached for Binance Spot WebSocket. Giving up.")
     
     logger.info("Binance Spot WebSocket manager stopped")
 
@@ -528,7 +553,11 @@ async def binance_perp_websocket_manager(trading_pairs):
     }
     
     retry_count = 0
-    while running and retry_count < 5:
+    max_retries = 10
+    base_delay = 5
+    max_delay = 300  # 5 minutes
+    
+    while running and retry_count < max_retries:
         try:
             logger.info(f"Connecting to Binance Perpetual WebSocket for {', '.join(trading_pairs)}...")
             
@@ -542,7 +571,15 @@ async def binance_perp_websocket_manager(trading_pairs):
                     logger.error(f"Failed to initialize order book for Binance Perpetual {pair}")
             
             # Connect to WebSocket
-            async with websockets.connect(BINANCE_PERP_WS_URL) as websocket:
+            async with websockets.connect(
+                BINANCE_PERP_WS_URL,
+                ping_interval=20,  # Send ping every 20 seconds
+                ping_timeout=30,   # Wait 30 seconds for pong response
+                close_timeout=10   # Wait 10 seconds for close response
+            ) as websocket:
+                # Reset retry count on successful connection
+                retry_count = 0
+                
                 # Subscribe to streams
                 await websocket.send(json.dumps(payload))
                 
@@ -582,13 +619,25 @@ async def binance_perp_websocket_manager(trading_pairs):
                         except:
                             logger.warning("Binance Perpetual WebSocket connection lost, reconnecting...")
                             break
+                    except websockets.exceptions.ConnectionClosedError as e:
+                        logger.warning(f"Binance Perpetual WebSocket connection closed: {e}")
+                        # Exit the inner loop to trigger reconnection
+                        break
                     except Exception as e:
                         logger.error(f"Error processing Binance Perpetual WebSocket message: {type(e).__name__} - {str(e)}")
+                        if isinstance(e, websockets.exceptions.WebSocketException):
+                            break
         
         except Exception as e:
             logger.error(f"Binance Perpetual WebSocket connection error: {type(e).__name__} - {str(e)}")
             retry_count += 1
-            await asyncio.sleep(5)
+            # Calculate exponential backoff delay with jitter
+            delay = min(max_delay, base_delay * (2 ** (retry_count - 1))) * (0.8 + 0.4 * random.random())
+            logger.info(f"Reconnecting in {delay:.2f} seconds (retry {retry_count}/{max_retries})...")
+            await asyncio.sleep(delay)
+    
+    if retry_count >= max_retries:
+        logger.error(f"Max retries reached for Binance Perpetual WebSocket. Giving up.")
     
     logger.info("Binance Perpetual WebSocket manager stopped")
 
@@ -676,8 +725,13 @@ async def bybit_spot_websocket_manager(trading_pairs):
                 else:
                     logger.error(f"Failed to initialize order book for Bybit Spot {pair}")
             
-            # Connect to WebSocket
-            async with websockets.connect(BYBIT_SPOT_WS_URL) as websocket:
+            # Connect to WebSocket with ping_interval and ping_timeout
+            async with websockets.connect(
+                BYBIT_SPOT_WS_URL,
+                ping_interval=20,  # Send ping every 20 seconds
+                ping_timeout=10,   # Wait 10 seconds for pong response
+                close_timeout=10   # Wait 10 seconds for close response
+            ) as websocket:
                 # Subscribe to streams
                 await websocket.send(json.dumps(payload))
                 
@@ -708,16 +762,16 @@ async def bybit_spot_websocket_manager(trading_pairs):
                                         process_bybit_spot_orderbook(data["data"], matching_pair)
                             
                     except asyncio.TimeoutError:
-                        # Send ping to check connection
-                        try:
-                            pong = await websocket.ping()
-                            await asyncio.wait_for(pong, timeout=10)
-                            logger.info("Bybit Spot WebSocket connection alive")
-                        except:
-                            logger.warning("Bybit Spot WebSocket connection lost, reconnecting...")
-                            break
+                        # The websockets library will handle ping/pong automatically
+                        logger.debug("Bybit Spot WebSocket timeout, waiting for next message...")
+                        continue
+                    except websockets.exceptions.ConnectionClosed as e:
+                        logger.warning(f"Bybit Spot WebSocket connection closed: {e}")
+                        break
                     except Exception as e:
                         logger.error(f"Error processing Bybit Spot WebSocket message: {type(e).__name__} - {str(e)}")
+                        if isinstance(e, websockets.exceptions.WebSocketException):
+                            break
         
         except Exception as e:
             logger.error(f"Bybit Spot WebSocket connection error: {type(e).__name__} - {str(e)}")

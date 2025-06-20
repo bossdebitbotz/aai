@@ -1,2 +1,11 @@
 .aider*
 lob_collector.log
+
+# Data files
+/data/
+
+# Model files
+/models/
+
+# macOS specific
+**/.DS_Store

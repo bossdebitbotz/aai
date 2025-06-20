@@ -1,0 +1,10 @@
+pandas
+numpy
+psycopg2-binary
+websockets
+aiohttp
+pyarrow
+scikit-learn
+joblib
+torch
+tqdm 
