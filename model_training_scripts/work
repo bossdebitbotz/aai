@@ -1,0 +1,9 @@
+curl -X POST http://localhost:8888/api \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"method\": \"add_folder\",
+    \"params\": {
+      \"path\": \"aai_received\",
+      \"secret\": \"MW4IT2JRGAYIOKRVDKFMYG3U7J4V7RCJZA6Y3ORBZ5MMVBBUD5JQ\"
+    }
+  }"

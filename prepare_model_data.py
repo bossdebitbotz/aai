@@ -5,14 +5,15 @@ LOB Data Preparation for Attention Model
 This script performs the following steps to prepare the collected LOB data 
 for training the attention-based forecasting model:
 
-1.  Loads the 5-second resampled Parquet data.
-2.  Combines data from multiple exchanges and trading pairs into a single 
+1.  Loads LOB snapshots from the PostgreSQL database.
+2.  Resamples the data to a consistent 5-second frequency.
+3.  Combines data from multiple exchanges and trading pairs into a single 
     multivariate time series.
-3.  Applies stationary transformations (percent-change) to price data.
-4.  Scales all price and volume data using Min-Max scaling.
-5.  Generates overlapping sequences of context (input) and target (output) data.
-6.  Splits the sequences into training, validation, and testing sets.
-7.  Saves the processed data and scalers for use in the training script.
+4.  Applies stationary transformations (percent-change) to price data.
+5.  Scales all price and volume data using Min-Max scaling.
+6.  Generates overlapping sequences of context (input) and target (output) data.
+7.  Splits the sequences into training, validation, and testing sets.
+8.  Saves the processed data and scalers for use in the training script.
 """
 
 import os
@@ -22,6 +23,8 @@ from sklearn.preprocessing import MinMaxScaler
 import joblib
 import logging
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import psycopg2
+import json
 
 # Set up logging
 logging.basicConfig(
@@ -30,11 +33,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger("data_preparation")
 
+# Database Configuration
+DB_CONFIG = {
+    'host': 'localhost',
+    'port': 5433,
+    'user': 'backtest_user',
+    'password': 'backtest_password',
+    'database': 'backtest_db'
+}
+
 # Configuration
 PROCESSED_DATA_DIR = "data/processed"
 FINAL_DATA_DIR = "data/final"
 CONTEXT_LENGTH = 120  # 120 steps * 5s = 10 minutes
 TARGET_LENGTH = 24   # 24 steps * 5s = 2 minutes
+LOB_LEVELS = 5       # Number of LOB levels to extract from data
 
 # Exchanges and trading pairs to process
 exchanges_config = {
@@ -43,34 +56,89 @@ exchanges_config = {
     'bybit_spot': ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'WLD-USDT']
 }
 
-def load_resampled_data(exchange, trading_pair):
-    """Load all 5s resampled parquet files for a given pair."""
-    pair_dir = os.path.join(PROCESSED_DATA_DIR, exchange, trading_pair)
-    if not os.path.exists(pair_dir):
-        logger.warning(f"No processed data found for {exchange} {trading_pair}")
+def get_db_connection():
+    """Create a connection to the PostgreSQL database."""
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        return conn
+    except Exception as e:
+        logger.error(f"Error connecting to database: {e}")
+        return None
+
+def load_resampled_data_from_db(exchange, trading_pair):
+    """Load and resample data from the database for a given pair."""
+    logger.info(f"Loading data from database for {exchange} {trading_pair}...")
+    conn = get_db_connection()
+    if not conn:
+        return None
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT timestamp, data FROM lob_snapshots
+                WHERE exchange = %s AND trading_pair = %s
+                ORDER BY timestamp
+            """, (exchange, trading_pair))
+            rows = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"Error fetching data for {exchange} {trading_pair}: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+    if not rows:
+        logger.warning(f"No data found in database for {exchange} {trading_pair}")
+        return None
+
+    # Process rows into a list of dicts
+    lob_data_list = []
+    for timestamp, data in rows:
+        record = {'timestamp': timestamp}
+        bids = data.get('bids', [])
+        asks = data.get('asks', [])
+
+        for i in range(LOB_LEVELS):
+            if i < len(bids):
+                record[f'bid_price_{i+1}'] = float(bids[i][0])
+                record[f'bid_volume_{i+1}'] = float(bids[i][1])
+            else:
+                record[f'bid_price_{i+1}'] = 0.0
+                record[f'bid_volume_{i+1}'] = 0.0
+
+            if i < len(asks):
+                record[f'ask_price_{i+1}'] = float(asks[i][0])
+                record[f'ask_volume_{i+1}'] = float(asks[i][1])
+            else:
+                record[f'ask_price_{i+1}'] = 0.0
+                record[f'ask_volume_{i+1}'] = 0.0
+        lob_data_list.append(record)
+    
+    if not lob_data_list:
+        logger.warning(f"No processable LOB data for {exchange} {trading_pair}")
+        return None
+
+    # Create and resample DataFrame
+    df = pd.DataFrame(lob_data_list)
+    df['datetime'] = pd.to_datetime(df['timestamp'], utc=True)
+    df = df.set_index('datetime').drop(columns=['timestamp'])
+    
+    resampled_df = df.resample('5s').last()
+    resampled_df.ffill(inplace=True)
+    resampled_df.dropna(inplace=True)
+
+    if resampled_df.empty:
+        logger.warning(f"Resampling resulted in an empty DataFrame for {exchange} {trading_pair}")
         return None
     
-    all_files = []
-    for root, _, files in os.walk(pair_dir):
-        for file in files:
-            if file.endswith("_resampled_5s.parquet"):
-                all_files.append(os.path.join(root, file))
-    
-    if not all_files:
-        logger.warning(f"No 5s resampled files for {exchange} {trading_pair}")
-        return None
-    
-    df = pd.concat((pd.read_parquet(f) for f in all_files))
-    df = df.sort_values('timestamp').reset_index(drop=True)
-    df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
-    df = df.set_index('datetime')
-    return df
+    logger.info(f"Loaded and resampled {len(resampled_df)} rows for {exchange} {trading_pair}")
+    return resampled_df
 
 def process_single_pair(exchange, trading_pair):
     """Load, process, and prepare data for a single trading pair."""
     logger.info(f"Processing {exchange} {trading_pair}...")
     
-    df = load_resampled_data(exchange, trading_pair)
+    df = load_resampled_data_from_db(exchange, trading_pair)
     if df is None:
         return None
     
@@ -119,13 +187,16 @@ def main():
     logger.info("Combining all datasets into a single time series...")
     combined_df = pd.concat(all_dfs, axis=1)
     
-    # Re-index to a perfect 5-second interval and forward-fill gaps
+    # This ensures a consistent time series, filling gaps.
+    # We use linear interpolation for prices/volumes, which is more realistic than ffill.
+    # We limit interpolation to 2 minutes (24 steps) to avoid filling large, invalid gaps.
+    logger.info(f"Interpolating missing data points (limit: 2 minutes)...")
     full_range = pd.date_range(
         start=combined_df.index.min(), 
         end=combined_df.index.max(), 
         freq='5S'
     )
-    combined_df = combined_df.reindex(full_range).ffill().dropna()
+    combined_df = combined_df.reindex(full_range).interpolate(method='linear', limit_direction='forward', limit=24).dropna()
     
     logger.info(f"Final combined shape: {combined_df.shape}")
     
@@ -160,11 +231,22 @@ def main():
     
     n_samples, n_features = data.shape
     
+    n_sequences = n_samples - CONTEXT_LENGTH - TARGET_LENGTH + 1
+
+    if n_sequences <= 0:
+        logger.error(
+            f"Not enough data to create sequences. "
+            f"Need at least {CONTEXT_LENGTH + TARGET_LENGTH} data points, "
+            f"but got only {n_samples} after processing."
+        )
+        # Clean up temporary file before exiting
+        os.remove(temp_data_path)
+        return
+        
     # Create memory-mapped files for contexts and targets
     context_path = os.path.join(FINAL_DATA_DIR, "contexts.mmap")
     target_path = os.path.join(FINAL_DATA_DIR, "targets.mmap")
     
-    n_sequences = n_samples - CONTEXT_LENGTH - TARGET_LENGTH + 1
     
     # Ensure the directory exists
     if not os.path.exists(FINAL_DATA_DIR):

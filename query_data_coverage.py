@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """
-Query script to check data coverage in the LOB database.
-This script will show how many days of data we have accumulated
-across different exchanges and trading pairs.
+Data Coverage Query Tool
+
+This script provides detailed analysis of data gaps from the database,
+saving results to both console and CSV for further analysis.
 """
 
-import psycopg2
-from datetime import datetime, timezone
+import os
+import logging
 import pandas as pd
+import psycopg2
+from datetime import datetime
 
-# Database configuration (matching the collector script)
+# Database configuration
 DB_CONFIG = {
     'host': 'localhost',
     'port': 5433,
@@ -18,176 +21,138 @@ DB_CONFIG = {
     'database': 'backtest_db'
 }
 
-def get_db_connection():
-    """Create a connection to the PostgreSQL database"""
-    try:
-        conn = psycopg2.connect(
-            host=DB_CONFIG['host'],
-            port=DB_CONFIG['port'],
-            user=DB_CONFIG['user'],
-            password=DB_CONFIG['password'],
-            database=DB_CONFIG['database']
-        )
-        return conn
-    except Exception as e:
-        print(f"Error connecting to database: {type(e).__name__} - {str(e)}")
-        return None
+GAP_THRESHOLD_SECONDS = 10
 
-def query_data_coverage():
-    """Query and display data coverage statistics"""
-    conn = get_db_connection()
-    if not conn:
-        print("Failed to connect to database")
-        return
+def get_detailed_gaps():
+    """Get detailed gap information for all trading pairs."""
+    print("🔍 Extracting detailed gap information from database...")
     
     try:
-        with conn.cursor() as cursor:
-            print("=== LOB Data Coverage Summary ===\n")
-            
-            # Check if tables exist
-            cursor.execute("""
-                SELECT table_name 
-                FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name IN ('lob_snapshots', 'lob_metrics')
-            """)
-            tables = [row[0] for row in cursor.fetchall()]
-            
-            if not tables:
-                print("No LOB tables found in the database.")
-                return
-            
-            print(f"Found tables: {', '.join(tables)}\n")
-            
-            # For each table, get data coverage
-            for table in tables:
-                print(f"=== {table.upper()} TABLE ===")
-                
-                # Overall date range
-                cursor.execute(f"""
-                    SELECT 
-                        MIN(timestamp) as earliest,
-                        MAX(timestamp) as latest,
-                        COUNT(*) as total_records
-                    FROM {table}
-                """)
-                result = cursor.fetchone()
-                
-                if result and result[0]:
-                    earliest, latest, total_records = result
-                    duration = latest - earliest
-                    days = duration.days + (duration.seconds / 86400)  # Include partial days
-                    
-                    print(f"  Date Range: {earliest} to {latest}")
-                    print(f"  Duration: {days:.2f} days")
-                    print(f"  Total Records: {total_records:,}")
-                    print(f"  Average Records per Day: {total_records / max(days, 1):,.0f}")
-                else:
-                    print(f"  No data found in {table}")
-                    continue
-                
-                # Breakdown by exchange and trading pair
-                cursor.execute(f"""
-                    SELECT 
-                        exchange,
-                        trading_pair,
-                        MIN(timestamp) as earliest,
-                        MAX(timestamp) as latest,
-                        COUNT(*) as records,
-                        COUNT(DISTINCT DATE(timestamp)) as unique_days
-                    FROM {table}
-                    GROUP BY exchange, trading_pair
-                    ORDER BY exchange, trading_pair
-                """)
-                
-                results = cursor.fetchall()
-                if results:
-                    print(f"\n  Breakdown by Exchange and Trading Pair:")
-                    print(f"  {'Exchange':<15} {'Pair':<15} {'Start Date':<12} {'End Date':<12} {'Days':<6} {'Records':<10}")
-                    print(f"  {'-'*15} {'-'*15} {'-'*12} {'-'*12} {'-'*6} {'-'*10}")
-                    
-                    for row in results:
-                        exchange, pair, start, end, records, unique_days = row
-                        start_str = start.strftime('%Y-%m-%d')
-                        end_str = end.strftime('%Y-%m-%d')
-                        print(f"  {exchange:<15} {pair:<15} {start_str:<12} {end_str:<12} {unique_days:<6} {records:<10,}")
-                
-                # Daily breakdown for the last 7 days
-                cursor.execute(f"""
-                    SELECT 
-                        DATE(timestamp) as date,
-                        exchange,
-                        trading_pair,
-                        COUNT(*) as records
-                    FROM {table}
-                    WHERE timestamp >= NOW() - INTERVAL '7 days'
-                    GROUP BY DATE(timestamp), exchange, trading_pair
-                    ORDER BY date DESC, exchange, trading_pair
-                """)
-                
-                daily_results = cursor.fetchall()
-                if daily_results:
-                    print(f"\n  Last 7 Days Activity:")
-                    print(f"  {'Date':<12} {'Exchange':<15} {'Pair':<15} {'Records':<10}")
-                    print(f"  {'-'*12} {'-'*15} {'-'*15} {'-'*10}")
-                    
-                    for row in daily_results:
-                        date, exchange, pair, records = row
-                        print(f"  {date:<12} {exchange:<15} {pair:<15} {records:<10,}")
-                
-                print("\n")
-            
-            # Data quality checks
-            print("=== DATA QUALITY CHECKS ===")
-            
-            if 'lob_snapshots' in tables:
-                # Check for missing data gaps
-                cursor.execute("""
-                    WITH time_gaps AS (
-                        SELECT 
-                            exchange,
-                            trading_pair,
-                            timestamp,
-                            LAG(timestamp) OVER (
-                                PARTITION BY exchange, trading_pair 
-                                ORDER BY timestamp
-                            ) as prev_timestamp
-                        FROM lob_snapshots
-                    ),
-                    large_gaps AS (
-                        SELECT 
-                            exchange,
-                            trading_pair,
-                            timestamp - prev_timestamp as gap_duration
-                        FROM time_gaps
-                        WHERE prev_timestamp IS NOT NULL
-                        AND timestamp - prev_timestamp > INTERVAL '1 minute'
-                    )
-                    SELECT 
-                        exchange,
-                        trading_pair,
-                        COUNT(*) as gap_count,
-                        AVG(EXTRACT(EPOCH FROM gap_duration)/60) as avg_gap_minutes
-                    FROM large_gaps
-                    GROUP BY exchange, trading_pair
-                    ORDER BY gap_count DESC
-                """)
-                
-                gap_results = cursor.fetchall()
-                if gap_results:
-                    print("Data gaps > 1 minute:")
-                    print(f"{'Exchange':<15} {'Pair':<15} {'Gap Count':<12} {'Avg Gap (min)':<15}")
-                    print(f"{'-'*15} {'-'*15} {'-'*12} {'-'*15}")
-                    for row in gap_results:
-                        exchange, pair, gap_count, avg_gap = row
-                        print(f"{exchange:<15} {pair:<15} {gap_count:<12} {avg_gap:<15.1f}")
-                else:
-                    print("No significant data gaps found (>1 minute)")
-            
-    except Exception as e:
-        print(f"Error querying database: {e}")
-    finally:
+        conn = psycopg2.connect(**DB_CONFIG)
+        
+        # Get all gaps with detailed information
+        query = """
+        WITH lagged_timestamps AS (
+            SELECT
+                exchange,
+                trading_pair,
+                timestamp,
+                LAG(timestamp, 1) OVER (PARTITION BY exchange, trading_pair ORDER BY timestamp) as prev_timestamp
+            FROM lob_snapshots
+        )
+        SELECT
+            exchange,
+            trading_pair,
+            prev_timestamp as gap_start,
+            timestamp as gap_end,
+            EXTRACT(EPOCH FROM (timestamp - prev_timestamp)) as duration_seconds
+        FROM lagged_timestamps
+        WHERE (timestamp - prev_timestamp) > interval '%s seconds'
+        AND prev_timestamp IS NOT NULL
+        ORDER BY exchange, trading_pair, gap_start;
+        """ % GAP_THRESHOLD_SECONDS
+        
+        df_gaps = pd.read_sql(query, conn)
         conn.close()
+        
+        if df_gaps.empty:
+            print("✅ No significant gaps found!")
+            return df_gaps
+            
+        # Save to CSV
+        csv_filename = f"data_gaps_detailed_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        df_gaps.to_csv(csv_filename, index=False)
+        print(f"📊 Detailed gaps saved to: {csv_filename}")
+        
+        # Display summary statistics
+        print("\n📈 Gap Analysis Summary:")
+        print("=" * 80)
+        
+        summary = df_gaps.groupby(['exchange', 'trading_pair']).agg({
+            'duration_seconds': ['count', 'mean', 'max', 'sum']
+        }).round(2)
+        
+        summary.columns = ['Gap_Count', 'Avg_Duration_s', 'Max_Duration_s', 'Total_Gap_Time_s']
+        print(summary)
+        
+        # Show worst gaps (longest duration)
+        print("\n🚨 Top 10 Longest Data Gaps:")
+        print("-" * 100)
+        top_gaps = df_gaps.nlargest(10, 'duration_seconds')
+        for _, gap in top_gaps.iterrows():
+            print(f"{gap['exchange']:<15} {gap['trading_pair']:<12} "
+                  f"{gap['gap_start']:%Y-%m-%d %H:%M:%S} → {gap['gap_end']:%Y-%m-%d %H:%M:%S} "
+                  f"({gap['duration_seconds']:.0f}s)")
+        
+        # Show gap patterns by hour of day
+        print("\n⏰ Gap Distribution by Hour of Day:")
+        df_gaps['hour'] = pd.to_datetime(df_gaps['gap_start']).dt.hour
+        hourly_gaps = df_gaps.groupby('hour')['duration_seconds'].count().sort_index()
+        
+        for hour, count in hourly_gaps.items():
+            bar = "█" * min(int(count / max(hourly_gaps) * 20), 20)
+            print(f"{hour:02d}:00 │{bar:<20}│ {count} gaps")
+            
+        return df_gaps
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return pd.DataFrame()
+
+def analyze_coverage_quality():
+    """Analyze overall data coverage quality."""
+    print("\n🎯 Data Coverage Quality Analysis:")
+    print("=" * 50)
+    
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        
+        # Get data coverage statistics
+        coverage_query = """
+        SELECT 
+            exchange,
+            trading_pair,
+            COUNT(*) as total_snapshots,
+            MIN(timestamp) as first_snapshot,
+            MAX(timestamp) as last_snapshot,
+            EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))) as total_duration_seconds
+        FROM lob_snapshots
+        GROUP BY exchange, trading_pair
+        ORDER BY exchange, trading_pair;
+        """
+        
+        df_coverage = pd.read_sql(coverage_query, conn)
+        conn.close()
+        
+        # Calculate expected vs actual snapshots
+        df_coverage['expected_snapshots'] = df_coverage['total_duration_seconds'] / 1  # Assuming 1-second intervals
+        df_coverage['coverage_ratio'] = df_coverage['total_snapshots'] / df_coverage['expected_snapshots']
+        df_coverage['missing_snapshots'] = df_coverage['expected_snapshots'] - df_coverage['total_snapshots']
+        
+        print("\n📊 Coverage Statistics:")
+        for _, row in df_coverage.iterrows():
+            print(f"\n{row['exchange']} / {row['trading_pair']}:")
+            print(f"  📅 Period: {row['first_snapshot']} → {row['last_snapshot']}")
+            print(f"  📈 Snapshots: {row['total_snapshots']:,.0f} / {row['expected_snapshots']:,.0f} expected")
+            print(f"  📊 Coverage: {row['coverage_ratio']:.1%}")
+            print(f"  ❌ Missing: {row['missing_snapshots']:,.0f} snapshots")
+            
+        return df_coverage
+        
+    except Exception as e:
+        print(f"❌ Error analyzing coverage: {e}")
+        return pd.DataFrame()
 
 if __name__ == "__main__":
-    query_data_coverage() 
+    print("🚀 Starting Data Coverage Analysis")
+    print("=" * 50)
+    
+    # Get detailed gap information
+    gaps_df = get_detailed_gaps()
+    
+    # Analyze overall coverage quality
+    coverage_df = analyze_coverage_quality()
+    
+    print("\n✅ Analysis complete!")
+    if not gaps_df.empty:
+        print(f"📁 Detailed gap data saved to CSV file for further analysis.") 
