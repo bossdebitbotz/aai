@@ -241,7 +241,8 @@ class FullToBinancePerpForecaster(nn.Module):
         # --- Output Embedding (80 Binance perp features) ---
         self.output_embedding = BinancePerpOutputEmbedding(embedding_metadata, target_feature_indices, embed_dim)
         
-        self.positional_encoding = PositionalEncoding(embed_dim, dropout)
+        # Max sequence length: context_len * num_features = 240 * 240 = 57,600
+        self.positional_encoding = PositionalEncoding(embed_dim, dropout, max_len=100000)
 
         # --- Cross-Market Transformer ---
         encoder_layer = nn.TransformerEncoderLayer(
@@ -288,38 +289,47 @@ class FullToBinancePerpForecaster(nn.Module):
         # src shape: (batch_size, 240, 240) - 20min context, ALL market data
         # tgt shape: (batch_size, 24, 80) - 2min target, Binance perp only
 
-        batch_size, context_len, num_input_features = src.shape
+        # Create embeddings
+        input_feature_embeds = self.input_embedding(self.num_input_features)  # (240, embed_dim)
+        output_feature_embeds = self.output_embedding(self.num_target_features)  # (80, embed_dim)
+        
+        # Project input values and add feature embeddings
+        src_proj = self.value_projection(src.unsqueeze(-1))  # (batch, context_len, 240, embed_dim)
+        tgt_proj = self.value_projection(tgt.unsqueeze(-1))  # (batch, target_len, 80, embed_dim)
+
+        src_embedded = src_proj + input_feature_embeds.unsqueeze(0).unsqueeze(0)
+        tgt_embedded = tgt_proj + output_feature_embeds.unsqueeze(0).unsqueeze(0)
+
+        # Simpler approach: flatten feature dimension into sequence
+        batch_size, context_len, _ = src.shape
         target_len = tgt.shape[1]
         
-        # Simple feature-wise processing
-        # Flatten features to treat as sequence elements
-        src_flat = src.reshape(batch_size, context_len * num_input_features)  # (batch, 240*240)
-        tgt_flat = tgt.reshape(batch_size, target_len * self.num_target_features)  # (batch, 24*80)
+        # Encoder: Process temporal sequences with all features
+        # src_embedded: (batch_size, context_len, num_input_features, embed_dim)
+        # Flatten features into sequence: (batch_size, context_len * num_input_features, embed_dim)
+        src_flat = src_embedded.reshape(batch_size, context_len * self.num_input_features, self.embed_dim)
+        src_pos = self.positional_encoding(src_flat)
+        memory = self.transformer_encoder(src_pos)  # (batch_size, context_len * 240, embed_dim)
         
-        # Project to embedding dimension
-        src_embedded = self.value_projection(src_flat.unsqueeze(-1))  # (batch, 240*240, embed_dim)
-        tgt_embedded = self.value_projection(tgt_flat.unsqueeze(-1))  # (batch, 24*80, embed_dim)
+        # Decoder: Process temporal sequences with target features
+        # tgt_embedded: (batch_size, target_len, num_target_features, embed_dim)
+        # Flatten features into sequence: (batch_size, target_len * num_target_features, embed_dim)
+        tgt_flat = tgt_embedded.reshape(batch_size, target_len * self.num_target_features, self.embed_dim)
+        tgt_pos = self.positional_encoding(tgt_flat)
         
-        # Add positional encoding
-        src_pos = self.positional_encoding(src_embedded.permute(1, 0, 2)).permute(1, 0, 2)
-        tgt_pos = self.positional_encoding(tgt_embedded.permute(1, 0, 2)).permute(1, 0, 2)
+        # Create target mask for temporal causality
+        combined_target_len = target_len * self.num_target_features
+        tgt_mask = self.generate_square_subsequent_mask(combined_target_len).to(DEVICE)
         
-        # Encoder processes all input data
-        memory = self.transformer_encoder(src_pos)
-        
-        # Create causal mask for decoder
-        tgt_seq_len = target_len * self.num_target_features
-        tgt_mask = self.generate_square_subsequent_mask(tgt_seq_len).to(DEVICE)
-        
-        # Cross-attention decoder
+        # Cross-market decoding
         transformer_out = self.transformer_decoder(tgt_pos, memory, tgt_mask=tgt_mask)
+
+        # Project to output
+        output = self.output_layer(transformer_out)  # (batch_size, target_len * num_target_features, 1)
         
-        # Project back to original feature space
-        output = self.output_layer(transformer_out)  # (batch, 24*80, 1)
-        output = output.squeeze(-1)  # (batch, 24*80)
-        
-        # Reshape back to target format
-        output = output.reshape(batch_size, target_len, self.num_target_features)
+        # Reshape back to target format: (batch_size, target_len, num_target_features)
+        output = output.squeeze(-1)  # (batch_size, target_len * num_target_features)
+        output = output.reshape(batch_size, target_len, self.num_target_features)  # (batch_size, target_len, num_target_features)
         
         return output
     
