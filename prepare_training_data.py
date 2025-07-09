@@ -26,17 +26,17 @@ def prepare_training_data():
     
     print(f"Config: {config}")
     
-    # Get sequences and targets
-    train_sequences = train_data['sequences']  # Should be [N, total_length, features]
-    train_targets = train_data['targets']      # Should be [N, target_length, features]
+    # Get sequences and targets using correct keys
+    train_x = train_data['x']  # Context sequences [N, context_length, features]
+    train_y = train_data['y']  # Target sequences [N, target_length, features]
     
-    val_sequences = val_data['sequences']
-    val_targets = val_data['targets']
+    val_x = val_data['x']
+    val_y = val_data['y']
     
-    print(f"Train sequences shape: {train_sequences.shape}")
-    print(f"Train targets shape: {train_targets.shape}")
-    print(f"Val sequences shape: {val_sequences.shape}")
-    print(f"Val targets shape: {val_targets.shape}")
+    print(f"Train X shape: {train_x.shape}")
+    print(f"Train Y shape: {train_y.shape}")
+    print(f"Val X shape: {val_x.shape}")
+    print(f"Val Y shape: {val_y.shape}")
     
     # Combine sequences and targets to create full sequences
     # The training script expects [N, context_length + 1, features] 
@@ -46,17 +46,18 @@ def prepare_training_data():
     target_length = 1  # We only predict 1 step ahead for the transformer
     
     print(f"Context length: {context_length}")
-    print(f"Target length: {target_length}")
+    print(f"Original target length: {config['target_length']}")
+    print(f"Using target length: {target_length}")
     
     # Create combined sequences: [context] + [first_target_step]
     train_combined = np.concatenate([
-        train_sequences[:, :context_length, :],  # [N, 120, features]
-        train_targets[:, :1, :]                   # [N, 1, features] - just first target step
+        train_x,                    # [N, 120, features] - context
+        train_y[:, :1, :]          # [N, 1, features] - just first target step
     ], axis=1)  # [N, 121, features]
     
     val_combined = np.concatenate([
-        val_sequences[:, :context_length, :],
-        val_targets[:, :1, :]
+        val_x,                     # [N, 120, features] - context  
+        val_y[:, :1, :]           # [N, 1, features] - just first target step
     ], axis=1)
     
     # Combine train and validation for the final dataset
