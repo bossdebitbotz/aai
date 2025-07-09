@@ -1,0 +1,3 @@
+[submodule "spacetimeformer"]
+	path = spacetimeformer
+	url = https://github.com/QData/spacetimeformer.git
