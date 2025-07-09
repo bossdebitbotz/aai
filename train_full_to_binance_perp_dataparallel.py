@@ -74,7 +74,8 @@ class CrossMarketCompoundEmbedding(nn.Module):
 
     def forward(self, num_features):
         embeddings = []
-        device = next(self.parameters()).device
+        # Get device from embedding weights instead of next(parameters())
+        device = self.price_embed.weight.device
         
         for i in range(num_features):
             feature_embed = torch.cat([
@@ -100,7 +101,8 @@ class BinancePerpOutputEmbedding(nn.Module):
 
     def forward(self, num_target_features):
         embeddings = []
-        device = next(self.parameters()).device
+        # Get device from embedding weights instead of next(parameters())
+        device = self.perp_price_embed.weight.device
         
         for i in range(num_target_features):
             feature_embed = torch.cat([

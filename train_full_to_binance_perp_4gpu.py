@@ -116,7 +116,8 @@ class CrossMarketCompoundEmbedding(nn.Module):
 
     def forward(self, num_features):
         embeddings = []
-        device = next(self.parameters()).device
+        # Get device from embedding weights instead of next(parameters())
+        device = self.price_embed.weight.device
         
         for i in range(num_features):
             # Create compound embedding for each feature
@@ -144,7 +145,8 @@ class BinancePerpOutputEmbedding(nn.Module):
 
     def forward(self, num_target_features):
         embeddings = []
-        device = next(self.parameters()).device
+        # Get device from embedding weights instead of next(parameters())
+        device = self.perp_price_embed.weight.device
         
         for i in range(num_target_features):
             # Binance perp specialized embedding
@@ -592,8 +594,8 @@ def train_worker(rank, world_size):
         target_len=24  # 2 minutes at 5-second intervals
     ).to(device)
 
-    # Wrap model with DDP (disable buffer broadcasting to avoid memory sharing issues)
-    model = DDP(model, device_ids=[rank], broadcast_buffers=False)
+    # Wrap model with DDP (find unused parameters to fix gradient sync issues)
+    model = DDP(model, device_ids=[rank], find_unused_parameters=True)
 
     if rank == 0:
         logger.info(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
