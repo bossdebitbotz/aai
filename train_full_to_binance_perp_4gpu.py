@@ -592,8 +592,8 @@ def train_worker(rank, world_size):
         target_len=24  # 2 minutes at 5-second intervals
     ).to(device)
 
-    # Wrap model with DDP
-    model = DDP(model, device_ids=[rank])
+    # Wrap model with DDP (disable buffer broadcasting to avoid memory sharing issues)
+    model = DDP(model, device_ids=[rank], broadcast_buffers=False)
 
     if rank == 0:
         logger.info(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
