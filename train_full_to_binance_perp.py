@@ -288,41 +288,38 @@ class FullToBinancePerpForecaster(nn.Module):
         # src shape: (batch_size, 240, 240) - 20min context, ALL market data
         # tgt shape: (batch_size, 24, 80) - 2min target, Binance perp only
 
-        # Create embeddings
-        input_feature_embeds = self.input_embedding(self.num_input_features)  # (240, embed_dim)
-        output_feature_embeds = self.output_embedding(self.num_target_features)  # (80, embed_dim)
-        
-        # Project input values and add feature embeddings
-        src_proj = self.value_projection(src.unsqueeze(-1))  # (batch, context_len, 240, embed_dim)
-        tgt_proj = self.value_projection(tgt.unsqueeze(-1))  # (batch, target_len, 80, embed_dim)
-
-        src_embedded = src_proj + input_feature_embeds.unsqueeze(0).unsqueeze(0)
-        tgt_embedded = tgt_proj + output_feature_embeds.unsqueeze(0).unsqueeze(0)
-
-        # Reshape for transformer
-        batch_size, context_len, _ = src.shape
+        batch_size, context_len, num_input_features = src.shape
         target_len = tgt.shape[1]
         
-        # Encoder processes ALL market data
-        src_flat = src_embedded.permute(0, 2, 1, 3).reshape(batch_size * self.num_input_features, context_len, self.embed_dim)
-        src_pos = self.positional_encoding(src_flat.permute(1, 0, 2)).permute(1, 0, 2)
+        # Simple feature-wise processing
+        # Flatten features to treat as sequence elements
+        src_flat = src.reshape(batch_size, context_len * num_input_features)  # (batch, 240*240)
+        tgt_flat = tgt.reshape(batch_size, target_len * self.num_target_features)  # (batch, 24*80)
+        
+        # Project to embedding dimension
+        src_embedded = self.value_projection(src_flat.unsqueeze(-1))  # (batch, 240*240, embed_dim)
+        tgt_embedded = self.value_projection(tgt_flat.unsqueeze(-1))  # (batch, 24*80, embed_dim)
+        
+        # Add positional encoding
+        src_pos = self.positional_encoding(src_embedded.permute(1, 0, 2)).permute(1, 0, 2)
+        tgt_pos = self.positional_encoding(tgt_embedded.permute(1, 0, 2)).permute(1, 0, 2)
+        
+        # Encoder processes all input data
         memory = self.transformer_encoder(src_pos)
         
-        # Decoder focuses on Binance perp
-        tgt_flat = tgt_embedded.permute(0, 2, 1, 3).reshape(batch_size * self.num_target_features, target_len, self.embed_dim)
-        tgt_pos = self.positional_encoding(tgt_flat.permute(1, 0, 2)).permute(1, 0, 2)
+        # Create causal mask for decoder
+        tgt_seq_len = target_len * self.num_target_features
+        tgt_mask = self.generate_square_subsequent_mask(tgt_seq_len).to(DEVICE)
         
-        # Create target mask
-        tgt_mask = self.generate_square_subsequent_mask(target_len).to(DEVICE)
-        
-        # Cross-market decoding
+        # Cross-attention decoder
         transformer_out = self.transformer_decoder(tgt_pos, memory, tgt_mask=tgt_mask)
-
-        # Project to output
-        output = self.output_layer(transformer_out)  # (batch*80, target_len, 1)
+        
+        # Project back to original feature space
+        output = self.output_layer(transformer_out)  # (batch, 24*80, 1)
+        output = output.squeeze(-1)  # (batch, 24*80)
         
         # Reshape back to target format
-        output = output.reshape(batch_size, self.num_target_features, target_len).permute(0, 2, 1)
+        output = output.reshape(batch_size, target_len, self.num_target_features)
         
         return output
     
