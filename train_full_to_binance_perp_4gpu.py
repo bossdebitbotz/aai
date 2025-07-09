@@ -116,14 +116,15 @@ class CrossMarketCompoundEmbedding(nn.Module):
 
     def forward(self, num_features):
         embeddings = []
+        device = next(self.parameters()).device
         
         for i in range(num_features):
             # Create compound embedding for each feature
             feature_embed = torch.cat([
-                self.price_embed(torch.tensor(0)),
-                self.size_embed(torch.tensor(0)),
-                self.exchange_embed(torch.tensor(i % 3)),
-                self.pair_embed(torch.tensor(i % 4))
+                self.price_embed(torch.tensor(0, device=device)),
+                self.size_embed(torch.tensor(0, device=device)),
+                self.exchange_embed(torch.tensor(i % 3, device=device)),
+                self.pair_embed(torch.tensor(i % 4, device=device))
             ])
             embeddings.append(feature_embed)
         
@@ -143,12 +144,13 @@ class BinancePerpOutputEmbedding(nn.Module):
 
     def forward(self, num_target_features):
         embeddings = []
+        device = next(self.parameters()).device
         
         for i in range(num_target_features):
             # Binance perp specialized embedding
             feature_embed = torch.cat([
-                self.perp_price_embed(torch.tensor(0)),
-                self.perp_size_embed(torch.tensor(0))
+                self.perp_price_embed(torch.tensor(0, device=device)),
+                self.perp_size_embed(torch.tensor(0, device=device))
             ])
             embeddings.append(feature_embed)
         
@@ -169,7 +171,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)
 
     def forward(self, x):
-        x = x + self.pe[:x.size(0), :]
+        x = x + self.pe[:x.size(0), :].clone()
         return self.dropout(x)
 
 # --- 3. Model Architecture ---
