@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration following the paper's methodology
 CONFIG = {
-    'data_path': 'data/data/full_lob_data/resampled_5s',  # Updated to use full dataset
+    'data_path': 'data/full_lob_data/resampled_5s',  # Updated to use full dataset
     'output_path': 'data/final_attention',
     'context_length': 240,  # 240 steps * 5s = 20 minutes (matches paper)
     'target_length': 24,    # 24 steps * 5s = 2 minutes
