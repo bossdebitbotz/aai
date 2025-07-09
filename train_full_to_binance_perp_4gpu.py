@@ -509,17 +509,19 @@ def train_worker(rank, world_size):
     if rank == 0:
         logger.info("Loading data and metadata...")
     
+    # Try multiple data directory locations
+    data_dir = FINAL_DATA_DIR
     try:
-        with open(os.path.join(FINAL_DATA_DIR, 'embedding_metadata.json'), 'r') as f:
+        with open(os.path.join(data_dir, 'embedding_metadata.json'), 'r') as f:
             embedding_metadata = json.load(f)
     except FileNotFoundError:
         if rank == 0:
-            logger.error(f"Metadata file not found in {FINAL_DATA_DIR}")
+            logger.error(f"Metadata file not found in {data_dir}")
             logger.info("Trying alternative data directory...")
         try:
-            with open('data/final_attention/embedding_metadata.json', 'r') as f:
+            data_dir = 'data/final_attention'
+            with open(os.path.join(data_dir, 'embedding_metadata.json'), 'r') as f:
                 embedding_metadata = json.load(f)
-                FINAL_DATA_DIR = 'data/final_attention'
         except FileNotFoundError:
             if rank == 0:
                 logger.error("No metadata file found. Please check data preparation.")
@@ -536,16 +538,16 @@ def train_worker(rank, world_size):
     # Load datasets
     try:
         train_dataset = FullToBinancePerpDataset(
-            os.path.join(FINAL_DATA_DIR, 'train.npz'), 
+            os.path.join(data_dir, 'train.npz'), 
             target_feature_indices
         )
         val_dataset = FullToBinancePerpDataset(
-            os.path.join(FINAL_DATA_DIR, 'validation.npz'), 
+            os.path.join(data_dir, 'validation.npz'), 
             target_feature_indices
         )
     except FileNotFoundError:
         if rank == 0:
-            logger.error(f"Dataset files not found in {FINAL_DATA_DIR}")
+            logger.error(f"Dataset files not found in {data_dir}")
         cleanup_distributed()
         return
 
