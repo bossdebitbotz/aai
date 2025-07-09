@@ -18,6 +18,7 @@ import os
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+from torch.amp import autocast, GradScaler
 import numpy as np
 import json
 import logging
@@ -25,22 +26,24 @@ from tqdm import tqdm
 import math
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from datetime import datetime
+import os
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
-# --- H100 VPS Configuration ---
+# --- H100 VPS Configuration (Memory Optimized) ---
 FINAL_DATA_DIR = "data/final_attention_240"  # Full 240-feature dataset with 20min context
 MODEL_SAVE_DIR = "models/full_to_binance_perp"
-BATCH_SIZE = 32  # H100 optimized
+BATCH_SIZE = 8   # Reduced for memory efficiency
 LEARNING_RATE = 1e-4
 WARMUP_STEPS = 1000
 EPOCHS = 100
 PATIENCE = 10
-EMBED_DIM = 240  # Match input features for efficiency
-NUM_HEADS = 8  # H100 optimized
-NUM_ENCODER_LAYERS = 6  # Deeper for cross-market learning
-NUM_DECODER_LAYERS = 4
+EMBED_DIM = 128  # Reduced from 240 for memory efficiency
+NUM_HEADS = 8    # Keep 8 heads but smaller embedding
+NUM_ENCODER_LAYERS = 4  # Reduced from 6 for memory
+NUM_DECODER_LAYERS = 3  # Reduced from 4 for memory
 DROPOUT = 0.1
 REG_WEIGHT = 0.01  # Structural regularizer weight
-NUM_WORKERS = 16  # H100 VPS optimized
+NUM_WORKERS = 8   # Reduced for memory
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -263,6 +266,10 @@ class FullToBinancePerpForecaster(nn.Module):
         
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_encoder_layers)
         self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_decoder_layers)
+        
+        # Enable gradient checkpointing for memory efficiency
+        self.transformer_encoder.enable_nested_tensor = False
+        self.transformer_decoder.enable_nested_tensor = False
 
         # --- Cross-Market Attention Layer ---
         self.cross_market_attention = nn.MultiheadAttention(
@@ -422,8 +429,8 @@ def warmup_lr_schedule(step, warmup_steps, d_model):
 
 # --- 6. Training Functions ---
 
-def train_epoch(model, train_loader, optimizer, mse_loss_fn, struct_loss_fn, epoch):
-    """Train for one epoch."""
+def train_epoch(model, train_loader, optimizer, mse_loss_fn, struct_loss_fn, epoch, scaler):
+    """Train for one epoch with mixed precision."""
     model.train()
     total_loss = 0.0
     total_mse = 0.0
@@ -437,19 +444,22 @@ def train_epoch(model, train_loader, optimizer, mse_loss_fn, struct_loss_fn, epo
             decoder_input = torch.zeros_like(target)
             decoder_input[:, 1:] = target[:, :-1]
             
-            # Forward pass
-            predictions = model(context, decoder_input)
+            # Mixed precision forward pass
+            with autocast('cuda'):
+                predictions = model(context, decoder_input)
+                
+                # Compute losses
+                mse_loss = mse_loss_fn(predictions, target)
+                struct_loss = struct_loss_fn(predictions)
+                total_loss_batch = mse_loss + REG_WEIGHT * struct_loss
             
-            # Compute losses
-            mse_loss = mse_loss_fn(predictions, target)
-            struct_loss = struct_loss_fn(predictions)
-            total_loss_batch = mse_loss + REG_WEIGHT * struct_loss
-            
-            # Backward pass
+            # Mixed precision backward pass
             optimizer.zero_grad()
-            total_loss_batch.backward()
+            scaler.scale(total_loss_batch).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             
             # Update learning rate with warmup
             step = epoch * len(train_loader) + batch_idx
@@ -477,7 +487,7 @@ def train_epoch(model, train_loader, optimizer, mse_loss_fn, struct_loss_fn, epo
     }
 
 def validate_epoch(model, val_loader, mse_loss_fn, struct_loss_fn):
-    """Validate for one epoch."""
+    """Validate for one epoch with mixed precision."""
     model.eval()
     total_loss = 0.0
     total_mse = 0.0
@@ -491,13 +501,14 @@ def validate_epoch(model, val_loader, mse_loss_fn, struct_loss_fn):
             decoder_input = torch.zeros_like(target)
             decoder_input[:, 1:] = target[:, :-1]
             
-            # Forward pass
-            predictions = model(context, decoder_input)
-            
-            # Compute losses
-            mse_loss = mse_loss_fn(predictions, target)
-            struct_loss = struct_loss_fn(predictions)
-            total_loss_batch = mse_loss + REG_WEIGHT * struct_loss
+            # Mixed precision forward pass
+            with autocast('cuda'):
+                predictions = model(context, decoder_input)
+                
+                # Compute losses
+                mse_loss = mse_loss_fn(predictions, target)
+                struct_loss = struct_loss_fn(predictions)
+                total_loss_batch = mse_loss + REG_WEIGHT * struct_loss
             
             total_loss += total_loss_batch.item()
             total_mse += mse_loss.item()
@@ -564,11 +575,12 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Total parameters: {total_params:,}")
     
-    # Initialize loss functions and optimizer
+    # Initialize loss functions, optimizer, and mixed precision scaler
     mse_loss_fn = nn.MSELoss()
     struct_loss_fn = BinancePerpStructuralLoss(embedding_metadata, target_feature_indices).to(DEVICE)
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
+    scaler = GradScaler('cuda')  # Mixed precision scaler
 
     # Training loop
     best_val_loss = float('inf')
@@ -582,7 +594,7 @@ def main():
     logger.info(f"Starting training for {EPOCHS} epochs...")
     for epoch in range(1, EPOCHS + 1):
         # Train
-        train_metrics = train_epoch(model, train_loader, optimizer, mse_loss_fn, struct_loss_fn, epoch)
+        train_metrics = train_epoch(model, train_loader, optimizer, mse_loss_fn, struct_loss_fn, epoch, scaler)
         
         # Validate
         val_metrics = validate_epoch(model, val_loader, mse_loss_fn, struct_loss_fn)
