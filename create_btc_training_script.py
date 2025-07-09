@@ -18,7 +18,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Add spacetimeformer to path
-sys.path.append('/root/aai/spacetimeformer')
+sys.path.append(os.path.join(os.getcwd(), 'spacetimeformer'))
 
 from spacetimeformer.spacetimeformer_model import Spacetimeformer_Model
 from spacetimeformer.data.datamodule import DataModule
@@ -187,8 +187,8 @@ def train_model(rank, world_size):
     model = DDP(model, device_ids=[rank])
     
     # Create datasets
-    train_dataset = LOBDataset('/root/aai/data/attention_sequences_btc_1min_train.pkl')
-    val_dataset = LOBDataset('/root/aai/data/attention_sequences_btc_1min_val.pkl')
+    train_dataset = LOBDataset(os.path.join(os.getcwd(), 'data', 'attention_sequences_btc_1min_train.pkl'))
+    val_dataset = LOBDataset(os.path.join(os.getcwd(), 'data', 'attention_sequences_btc_1min_val.pkl'))
     
     # Create distributed samplers
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
@@ -256,7 +256,7 @@ def train_model(rank, world_size):
                     'train_loss': train_loss,
                     'val_loss': val_loss,
                 }
-                torch.save(checkpoint, f'/root/aai/models/btc_1min_checkpoint_epoch_{epoch+1}.pt')
+                torch.save(checkpoint, os.path.join(os.getcwd(), 'models', f'btc_1min_checkpoint_epoch_{epoch+1}.pt'))
     
     # Save final model
     if rank == 0:
@@ -266,7 +266,7 @@ def train_model(rank, world_size):
             'final_train_loss': train_loss,
             'final_val_loss': val_loss,
         }
-        torch.save(final_checkpoint, '/root/aai/models/btc_1min_final_model.pt')
+        torch.save(final_checkpoint, os.path.join(os.getcwd(), 'models', 'btc_1min_final_model.pt'))
         print("Training completed!")
     
     cleanup()
