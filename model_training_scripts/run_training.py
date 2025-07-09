@@ -69,7 +69,6 @@ def get_script_paths(timeframes, pairs):
         for pair in pairs:
             script_name = f"train_{timeframe}min_binance_perp_{pair}.py"
             script_path = os.path.join(
-                "model_training_scripts", 
                 f"{timeframe}min_predictions", 
                 script_name
             )
