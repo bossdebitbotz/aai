@@ -6,8 +6,10 @@ This model uses ALL available market data (240 features) as input context
 to predict ONLY Binance perpetual futures (80 features) as output.
 
 Strategy:
-- Input: All 240 features (3 exchanges × 4 pairs × 20 features)
+- Input: All 240 features (3 exchanges × 4 pairs × 20 features)  
+- Context: 20 minutes (240 steps × 5 seconds) - matches paper
 - Output: Only 80 Binance perp features (4 pairs × 20 features)
+- Target: 2 minutes (24 steps × 5 seconds)
 - Leverages cross-market arbitrage and leading indicators
 - H100 VPS optimized for maximum performance
 """
@@ -61,7 +63,7 @@ class FullToBinancePerpDataset(Dataset):
         
         with np.load(file_path) as data:
             self.len = data['x'].shape[0]
-            self.x_shape = data['x'].shape  # (sequences, 120, 240)
+            self.x_shape = data['x'].shape  # (sequences, 240, 240) - 20min context
             self.y_shape = data['y'].shape  # (sequences, 24, 240)
             
         # New target shape: only Binance perp features
@@ -276,8 +278,8 @@ class FullToBinancePerpForecaster(nn.Module):
         )
 
     def forward(self, src, tgt):
-        # src shape: (batch_size, context_len, 240) - ALL market data
-        # tgt shape: (batch_size, target_len, 80) - Binance perp only
+        # src shape: (batch_size, 240, 240) - 20min context, ALL market data
+        # tgt shape: (batch_size, 24, 80) - 2min target, Binance perp only
 
         # Create embeddings
         input_feature_embeds = self.input_embedding(self.num_input_features)  # (240, embed_dim)

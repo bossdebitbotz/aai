@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 CONFIG = {
     'data_path': 'data/data/full_lob_data/resampled_5s',  # Updated to use full dataset
     'output_path': 'data/final_attention',
-    'context_length': 120,  # 120 steps * 5s = 10 minutes
+    'context_length': 240,  # 240 steps * 5s = 20 minutes (matches paper)
     'target_length': 24,    # 24 steps * 5s = 2 minutes
     'lob_levels': 5,
     'train_ratio': 0.6,
@@ -56,7 +56,7 @@ CONFIG = {
     'test_ratio': 0.2,
     'exchanges': ['binance_spot', 'binance_perp', 'bybit_spot'],
     'trading_pairs': ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'WLD-USDT'],
-    'min_session_length': 200,  # Minimum 200 steps (16.7 minutes) for valid sequences
+    'min_session_length': 300,  # Minimum 300 steps (25 minutes) for valid sequences with 20min context
     'overlap_ratio': 0.5  # 50% overlap between sequences
 }
 
