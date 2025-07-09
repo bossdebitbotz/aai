@@ -45,7 +45,7 @@ logger.info(f"Using device: {DEVICE}")
 
 # Paper Configuration (exact values from paper)
 CONFIG = {
-    'data_path': 'data/final_attention',
+    'data_path': 'data/data/final_attention',  # VPS path structure
     'model_save_dir': 'models/paper_implementation',
     'batch_size': 4,  # Small batch for high-frequency data
     'learning_rate': 5e-4,  # Base LR as in paper
