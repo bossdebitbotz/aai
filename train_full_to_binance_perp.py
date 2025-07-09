@@ -27,7 +27,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 from datetime import datetime
 
 # --- H100 VPS Configuration ---
-FINAL_DATA_DIR = "data/final_attention"  # Full 240-feature dataset
+FINAL_DATA_DIR = "data/final_attention_240"  # Full 240-feature dataset with 20min context
 MODEL_SAVE_DIR = "models/full_to_binance_perp"
 BATCH_SIZE = 32  # H100 optimized
 LEARNING_RATE = 1e-4
