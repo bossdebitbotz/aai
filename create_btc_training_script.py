@@ -17,9 +17,6 @@ import pickle
 import warnings
 warnings.filterwarnings('ignore')
 
-# Add spacetimeformer to path
-sys.path.append(os.path.join(os.getcwd(), 'spacetimeformer'))
-
 from spacetimeformer.spacetimeformer_model import Spacetimeformer_Model
 from spacetimeformer.data.datamodule import DataModule
 from spacetimeformer.data.csv_dataset import CSVDataset, CSVTorchDset
