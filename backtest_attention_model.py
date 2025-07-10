@@ -21,6 +21,7 @@ import seaborn as sns
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import logging
 from datetime import datetime
+import math
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -84,7 +85,7 @@ class PositionalEncoding(nn.Module):
 
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0).transpose(0, 1)
@@ -196,14 +197,15 @@ def load_model_and_data():
     logger.info("Loading trained model and test data...")
     
     # Load metadata
+    data_dir = DATA_DIR
     try:
-        with open(os.path.join(DATA_DIR, 'embedding_metadata.json'), 'r') as f:
+        with open(os.path.join(data_dir, 'embedding_metadata.json'), 'r') as f:
             embedding_metadata = json.load(f)
     except FileNotFoundError:
         # Try alternative location
-        with open('data/final_attention/embedding_metadata.json', 'r') as f:
+        data_dir = 'data/final_attention'
+        with open(os.path.join(data_dir, 'embedding_metadata.json'), 'r') as f:
             embedding_metadata = json.load(f)
-        DATA_DIR = 'data/final_attention'
     
     # Get target indices
     target_feature_indices = get_binance_perp_indices(embedding_metadata)
@@ -229,10 +231,18 @@ def load_model_and_data():
     model.eval()
     
     # Load test data
-    with np.load(os.path.join(DATA_DIR, 'test.npz'), allow_pickle=True) as data:
-        test_context = torch.from_numpy(data['x']).float()
-        test_target_full = torch.from_numpy(data['y']).float()
-        test_target = test_target_full[:, :, target_feature_indices]
+    try:
+        with np.load(os.path.join(data_dir, 'test.npz'), allow_pickle=True) as data:
+            test_context = torch.from_numpy(data['x']).float()
+            test_target_full = torch.from_numpy(data['y']).float()
+            test_target = test_target_full[:, :, target_feature_indices]
+    except FileNotFoundError:
+        # Use validation data if test data doesn't exist
+        logger.info("Test data not found, using validation data for backtest...")
+        with np.load(os.path.join(data_dir, 'validation.npz'), allow_pickle=True) as data:
+            test_context = torch.from_numpy(data['x']).float()
+            test_target_full = torch.from_numpy(data['y']).float()
+            test_target = test_target_full[:, :, target_feature_indices]
     
     logger.info(f"Model loaded successfully")
     logger.info(f"Test data: {test_context.shape[0]} sequences")
