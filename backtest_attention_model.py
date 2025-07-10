@@ -468,9 +468,17 @@ def save_results(metrics, trading_metrics, save_dir):
         
         json.dump(json_metrics, f, indent=2)
     
-    # Save trading metrics
+    # Save trading metrics (convert numpy types to native Python types)
     with open(os.path.join(save_dir, 'trading_metrics.json'), 'w') as f:
-        json.dump(trading_metrics, f, indent=2)
+        json_trading_metrics = {}
+        for key, value in trading_metrics.items():
+            if isinstance(value, (np.floating, np.integer)):
+                json_trading_metrics[key] = float(value)
+            elif isinstance(value, np.ndarray):
+                json_trading_metrics[key] = value.tolist()
+            else:
+                json_trading_metrics[key] = value
+        json.dump(json_trading_metrics, f, indent=2)
     
     # Create summary report
     with open(os.path.join(save_dir, 'backtest_report.txt'), 'w') as f:
