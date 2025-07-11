@@ -25,7 +25,7 @@ from datetime import datetime
 # --- Configuration ---
 FINAL_DATA_DIR = "data/final_attention_240"
 MODEL_SAVE_DIR = "models/wld_3min_fixed"
-BATCH_SIZE = 8   # Single GPU batch size
+BATCH_SIZE = 32   # Large batch size for 4 GPUs (8 per GPU)
 LEARNING_RATE = 1e-4
 WARMUP_STEPS = 1000
 EPOCHS = 130
@@ -327,8 +327,11 @@ def main():
         logger.error("CUDA not available!")
         return
         
-    logger.info(f"Using single GPU training")
-    logger.info(f"Batch size: {BATCH_SIZE}")
+    num_gpus = torch.cuda.device_count()
+    logger.info(f"Using {num_gpus} GPUs with DataParallel")
+    logger.info(f"Effective batch size: {BATCH_SIZE} ({BATCH_SIZE//num_gpus} per GPU)")
+    if num_gpus != 4:
+        logger.warning(f"Expected 4 H100s but found {num_gpus} GPUs")
 
     # --- Data Loading ---
     logger.info("Loading data and metadata...")
@@ -405,10 +408,15 @@ def main():
         target_len=TARGET_STEPS  # 36 steps for 3 minutes
     )
 
-    # Single GPU - no DataParallel needed
+    # Use DataParallel for multi-GPU (4x H100s)
+    if num_gpus > 1:
+        model = nn.DataParallel(model)
+        logger.info(f"Model wrapped with DataParallel for {num_gpus} H100 GPUs")
+    
     model = model.to(DEVICE)
 
     logger.info(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
+    logger.info("💰 Using all 4x H100s - maximizing expensive compute!")
 
     # --- Loss Functions & Optimizer ---
     mse_loss_fn = nn.MSELoss()
@@ -533,7 +541,7 @@ def main():
             # Save model (no DataParallel wrapper to handle)
             checkpoint = {
                 'epoch': epoch,
-                'model_state_dict': model.state_dict(),
+                'model_state_dict': model.module.state_dict() if isinstance(model, nn.DataParallel) else model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'train_metrics': train_metrics,
                 'val_metrics': val_metrics,
