@@ -57,13 +57,21 @@ def load_model_and_data(model_path):
         test_y = data['y']  # (samples, target_len, all_features)
     
     # Extract only WLD target features from test data
-    test_y_wld = test_y[:, :target_steps, target_feature_indices]
+    # Ensure we have enough target steps in the test data
+    if test_y.shape[1] < target_steps:
+        logger.warning(f"Test data only has {test_y.shape[1]} target steps, but model expects {target_steps}")
+        logger.info(f"Using available {test_y.shape[1]} steps instead")
+        actual_target_steps = test_y.shape[1]
+    else:
+        actual_target_steps = target_steps
+    
+    test_y_wld = test_y[:, :actual_target_steps, target_feature_indices]
     
     logger.info(f"Test data: {test_x.shape[0]} sequences")
     logger.info(f"Context: {test_x.shape[1]} steps, {test_x.shape[2]} features")
     logger.info(f"Target: {test_y_wld.shape[1]} steps, {test_y_wld.shape[2]} WLD features")
     
-    return test_x, test_y_wld, target_feature_indices, target_steps, checkpoint
+    return test_x, test_y_wld, target_feature_indices, actual_target_steps, checkpoint
 
 def create_model(checkpoint, target_feature_indices, target_steps, force_cpu=False):
     """Recreate the model architecture."""
@@ -99,6 +107,8 @@ def create_model(checkpoint, target_feature_indices, target_steps, force_cpu=Fal
     # Move to device
     if torch.cuda.is_available() and not force_cpu:
         model = model.cuda()
+        logger.info(f"Using device: cuda")
+        logger.info(f"Available GPUs: {torch.cuda.device_count()}")
         logger.info("Model loaded on GPU successfully")
     else:
         logger.info("Model loaded on CPU (memory-safe mode)")
@@ -283,28 +293,36 @@ def main():
         logger.info("⚠️  Using CPU inference (memory-safe mode)")
     
     # Load model and data
-    test_x, test_y_wld, target_feature_indices, target_steps, checkpoint = load_model_and_data(args.model_path)
+    test_x, test_y_wld, target_feature_indices, actual_target_steps, checkpoint = load_model_and_data(args.model_path)
     
-    # Create model
+    # Get the model's expected target steps from checkpoint
+    model_target_steps = checkpoint.get('target_steps', 24)
+    
+    # Create model with the original target steps it was trained with
     try:
-        model = create_model(checkpoint, target_feature_indices, target_steps, force_cpu=args.cpu)
+        model = create_model(checkpoint, target_feature_indices, model_target_steps, force_cpu=args.cpu)
     except RuntimeError as e:
         if "memory" in str(e).lower():
             logger.error("GPU memory insufficient, falling back to CPU")
-            model = create_model(checkpoint, target_feature_indices, target_steps, force_cpu=True)
+            model = create_model(checkpoint, target_feature_indices, model_target_steps, force_cpu=True)
         else:
             raise
     
-    # Run inference
+    # Run inference with model's expected target steps
     try:
-        predictions = run_inference(model, test_x, target_steps)
+        predictions = run_inference(model, test_x, model_target_steps)
     except RuntimeError as e:
         if "memory" in str(e).lower():
             logger.error("GPU inference failed, retrying on CPU")
-            model = create_model(checkpoint, target_feature_indices, target_steps, force_cpu=True)
-            predictions = run_inference(model, test_x, target_steps)
+            model = create_model(checkpoint, target_feature_indices, model_target_steps, force_cpu=True)
+            predictions = run_inference(model, test_x, model_target_steps)
         else:
             raise
+    
+    # If model produces more steps than we have in test data, truncate predictions
+    if predictions.shape[1] > actual_target_steps:
+        logger.info(f"Truncating predictions from {predictions.shape[1]} to {actual_target_steps} steps to match test data")
+        predictions = predictions[:, :actual_target_steps, :]
     
     # Calculate metrics
     metrics = calculate_metrics(predictions, test_y_wld)
