@@ -23,7 +23,7 @@ import math
 from datetime import datetime
 
 # --- Configuration ---
-FINAL_DATA_DIR = "data/final_attention"  # Updated to use full 39-day dataset
+FINAL_DATA_DIR = "data/data/final_attention"  # Updated to use full 39-day dataset
 MODEL_SAVE_DIR = "models/wld_3min_full_dataset"  # New save directory for full dataset model
 BATCH_SIZE = 32   # Large batch size for 4 GPUs (8 per GPU)
 LEARNING_RATE = 1e-4
