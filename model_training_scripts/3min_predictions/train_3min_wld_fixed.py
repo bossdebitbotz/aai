@@ -23,8 +23,8 @@ import math
 from datetime import datetime
 
 # --- Configuration ---
-FINAL_DATA_DIR = "data/final_attention_240"
-MODEL_SAVE_DIR = "models/wld_3min_fixed"
+FINAL_DATA_DIR = "data/final_attention"  # Updated to use full 39-day dataset
+MODEL_SAVE_DIR = "models/wld_3min_full_dataset"  # New save directory for full dataset model
 BATCH_SIZE = 32   # Large batch size for 4 GPUs (8 per GPU)
 LEARNING_RATE = 1e-4
 WARMUP_STEPS = 1000
@@ -45,12 +45,13 @@ TARGET_EXCHANGE = "binance_perp"
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("wld_3min_fixed_training")
+logger = logging.getLogger("wld_3min_full_dataset_training")
 
 # Check for CUDA availability
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger.info(f"Using device: {DEVICE}")
-logger.info(f"Target: 3-minute WLD predictions using proven architecture")
+logger.info(f"🚀 Target: 3-minute WLD predictions using FULL 39-DAY DATASET (40x more training data!)")
+logger.info(f"💪 Training on 303 sequences from 39 days vs previous 642 sequences from 4 hours")
 
 # --- Copy the same model classes from the working script ---
 
@@ -319,8 +320,9 @@ def warmup_lr_schedule(step, warmup_steps, d_model):
     return min(step ** -0.5, step * warmup_steps ** -1.5) * (d_model ** -0.5)
 
 def main():
-    """Main training function for WLD 3-minute predictions"""
-    logger.info("🚀 WLD 3-Minute Prediction Training Started!")
+    """Main training function for WLD 3-minute predictions using FULL 39-day dataset"""
+    logger.info("🚀 WLD 3-Minute Prediction Training Started with FULL DATASET!")
+    logger.info("📈 Using 39 days of LOB data (823k records) vs previous 4 hours (83k records)")
     
     # Check GPU availability
     if not torch.cuda.is_available():
