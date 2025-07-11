@@ -65,7 +65,7 @@ def load_model_and_data(model_path):
     
     return test_x, test_y_wld, target_feature_indices, target_steps, checkpoint
 
-def create_model(checkpoint, target_feature_indices, target_steps):
+def create_model(checkpoint, target_feature_indices, target_steps, force_cpu=False):
     """Recreate the model architecture."""
     # Import the model architecture (assuming it's in the same directory)
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -96,26 +96,56 @@ def create_model(checkpoint, target_feature_indices, target_steps):
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     
-    logger.info("Model loaded successfully")
+    # Move to device
+    if torch.cuda.is_available() and not force_cpu:
+        model = model.cuda()
+        logger.info("Model loaded on GPU successfully")
+    else:
+        logger.info("Model loaded on CPU (memory-safe mode)")
+    
     return model
 
-def run_inference(model, test_x, target_steps, batch_size=8):
+def run_inference(model, test_x, target_steps, batch_size=1):  # Reduced from 8 to 1
     """Run model inference on test data."""
     logger.info("Running inference on test data...")
+    logger.info(f"Using batch size: {batch_size} (reduced for memory efficiency)")
+    
+    # Check if model is on GPU
+    model_on_gpu = next(model.parameters()).is_cuda
+    device_name = "GPU" if model_on_gpu else "CPU"
+    logger.info(f"Model is on: {device_name}")
     
     predictions = []
     
     with torch.no_grad():
         for i in range(0, len(test_x), batch_size):
-            batch_x = torch.FloatTensor(test_x[i:i+batch_size])
-            
-            # Create decoder input (zeros for inference)
-            batch_size_actual = batch_x.shape[0]
-            decoder_input = torch.zeros(batch_size_actual, target_steps, len(model.target_feature_indices))
-            
-            # Forward pass
-            batch_pred = model(batch_x, decoder_input)
-            predictions.append(batch_pred.numpy())
+            try:
+                batch_x = torch.FloatTensor(test_x[i:i+batch_size])
+                
+                # Create decoder input (zeros for inference)
+                batch_size_actual = batch_x.shape[0]
+                decoder_input = torch.zeros(batch_size_actual, target_steps, len(model.target_feature_indices))
+                
+                # Move to same device as model
+                if model_on_gpu:
+                    batch_x = batch_x.cuda()
+                    decoder_input = decoder_input.cuda()
+                
+                # Forward pass
+                batch_pred = model(batch_x, decoder_input)
+                predictions.append(batch_pred.cpu().numpy())
+                
+                if (i // batch_size) % 10 == 0:
+                    logger.info(f"Processed {i + batch_size_actual}/{len(test_x)} sequences")
+                    
+            except RuntimeError as e:
+                if "memory" in str(e).lower():
+                    logger.error(f"Memory error at batch {i}: {e}")
+                    logger.info("Try using --cpu flag for CPU inference")
+                    raise
+                else:
+                    logger.error(f"Runtime error at batch {i}: {e}")
+                    raise
     
     predictions = np.concatenate(predictions, axis=0)
     logger.info(f"Inference completed: {len(predictions)} predictions")
@@ -244,19 +274,37 @@ def main():
     parser = argparse.ArgumentParser(description="Backtest WLD-specific attention model")
     parser.add_argument("--model_path", required=True, help="Path to the trained WLD model")
     parser.add_argument("--output_dir", default="wld_backtest_results", help="Output directory for results")
+    parser.add_argument("--cpu", action="store_true", help="Force CPU inference (slower but memory-safe)")
     
     args = parser.parse_args()
     
     logger.info("🚀 Starting WLD Model Backtest")
+    if args.cpu:
+        logger.info("⚠️  Using CPU inference (memory-safe mode)")
     
     # Load model and data
     test_x, test_y_wld, target_feature_indices, target_steps, checkpoint = load_model_and_data(args.model_path)
     
     # Create model
-    model = create_model(checkpoint, target_feature_indices, target_steps)
+    try:
+        model = create_model(checkpoint, target_feature_indices, target_steps, force_cpu=args.cpu)
+    except RuntimeError as e:
+        if "memory" in str(e).lower():
+            logger.error("GPU memory insufficient, falling back to CPU")
+            model = create_model(checkpoint, target_feature_indices, target_steps, force_cpu=True)
+        else:
+            raise
     
     # Run inference
-    predictions = run_inference(model, test_x, target_steps)
+    try:
+        predictions = run_inference(model, test_x, target_steps)
+    except RuntimeError as e:
+        if "memory" in str(e).lower():
+            logger.error("GPU inference failed, retrying on CPU")
+            model = create_model(checkpoint, target_feature_indices, target_steps, force_cpu=True)
+            predictions = run_inference(model, test_x, target_steps)
+        else:
+            raise
     
     # Calculate metrics
     metrics = calculate_metrics(predictions, test_y_wld)
