@@ -24,8 +24,8 @@ import pickle
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
 # --- Configuration ---
-FINAL_DATA_DIR = "data/final_attention"
-MODEL_SAVE_DIR = "models/3min_binance_perp_wld"
+FINAL_DATA_DIR = "data/final_attention_240"  # 20-minute context (240 steps)
+MODEL_SAVE_DIR = "models/3min_binance_perp_wld_240"
 BATCH_SIZE = 4
 LEARNING_RATE = 1e-4
 WARMUP_STEPS = 1000
@@ -156,7 +156,7 @@ class CompoundMultivariateEmbedding(nn.Module):
 
 class PositionalEncoding(nn.Module):
     """Standard positional encoding for transformer."""
-    def __init__(self, d_model, dropout=0.1, max_len=5000):
+    def __init__(self, d_model, dropout=0.1, max_len=100000):  # Increased for 240-step context
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
 
