@@ -193,23 +193,47 @@ def simulate_wld_trading(predictions, targets, threshold=0.001):
     logger.info("Simulating WLD trading performance...")
     
     # Use first feature (likely price) for trading simulation
+    # Calculate price changes from current to predicted
     pred_prices = predictions[:, -1, 0]  # Last predicted price
+    current_prices = predictions[:, 0, 0]  # First price in prediction window
     target_prices = targets[:, -1, 0]    # Actual final price
+    target_current = targets[:, 0, 0]    # Actual first price
     
-    # Trading signals based on predicted direction
-    signals = np.sign(pred_prices)  # 1 for buy, -1 for sell
-    returns = signals * target_prices  # Simple return simulation
+    # Calculate predicted and actual price changes
+    pred_change = pred_prices - current_prices
+    actual_change = target_prices - target_current
+    
+    # Trading signals based on predicted direction of change
+    signals = np.sign(pred_change)  # 1 for buy (price up), -1 for sell (price down), 0 for hold
+    
+    # Calculate returns based on actual price changes
+    # Only trade when we have a clear signal (not zero)
+    valid_trades = signals != 0
+    if np.sum(valid_trades) == 0:
+        return {
+            'hit_rate': 0.0,
+            'total_return': 0.0,
+            'sharpe_ratio': 0.0,
+            'num_trades': 0
+        }
+    
+    trade_signals = signals[valid_trades]
+    trade_returns = actual_change[valid_trades] * trade_signals
     
     # Calculate trading metrics
-    hit_rate = np.mean(returns > 0)
-    total_return = np.sum(returns)
-    sharpe_ratio = np.mean(returns) / (np.std(returns) + 1e-8) * np.sqrt(252)  # Annualized
+    hit_rate = np.mean(trade_returns > 0)
+    total_return = np.sum(trade_returns)
+    avg_return = np.mean(trade_returns)
+    return_std = np.std(trade_returns)
+    sharpe_ratio = avg_return / (return_std + 1e-8) * np.sqrt(252)  # Annualized
     
     return {
         'hit_rate': hit_rate,
         'total_return': total_return,
         'sharpe_ratio': sharpe_ratio,
-        'num_trades': len(returns)
+        'num_trades': len(trade_returns),
+        'avg_return': avg_return,
+        'return_std': return_std
     }
 
 def create_visualizations(predictions, targets, save_dir):
@@ -277,6 +301,8 @@ def save_results(metrics, trading_metrics, save_dir):
         f.write(f"Trading Performance:\n")
         f.write(f"  Hit Rate: {trading_metrics['hit_rate']:.3f}\n")
         f.write(f"  Total Return: {trading_metrics['total_return']:.6f}\n")
+        f.write(f"  Average Return: {trading_metrics.get('avg_return', 0):.6f}\n")
+        f.write(f"  Return Std: {trading_metrics.get('return_std', 0):.6f}\n")
         f.write(f"  Sharpe Ratio: {trading_metrics['sharpe_ratio']:.2f}\n")
         f.write(f"  Number of Trades: {trading_metrics['num_trades']}\n")
 
@@ -345,7 +371,10 @@ def main():
     logger.info(f"Overall R²: {metrics['r2']:.6f}")
     logger.info(f"Directional Accuracy: {metrics['directional_accuracy']:.3f}")
     logger.info(f"Trading Hit Rate: {trading_metrics['hit_rate']:.3f}")
+    logger.info(f"Trading Total Return: {trading_metrics['total_return']:.6f}")
+    logger.info(f"Trading Avg Return: {trading_metrics.get('avg_return', 0):.6f}")
     logger.info(f"Trading Sharpe Ratio: {trading_metrics['sharpe_ratio']:.2f}")
+    logger.info(f"Number of Trades: {trading_metrics['num_trades']}")
     logger.info(f"Results saved to: {args.output_dir}/")
     logger.info("🎉 WLD Backtest completed successfully!")
 
