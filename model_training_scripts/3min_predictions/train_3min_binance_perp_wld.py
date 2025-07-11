@@ -29,8 +29,8 @@ MODEL_SAVE_DIR = "models/3min_binance_perp_wld"
 BATCH_SIZE = 4
 LEARNING_RATE = 1e-4
 WARMUP_STEPS = 1000
-EPOCHS = 50
-PATIENCE = 5
+EPOCHS = 130
+PATIENCE = 10
 EMBED_DIM = 126  # Divisible by 3 heads
 NUM_HEADS = 3
 NUM_ENCODER_LAYERS = 3
@@ -250,7 +250,7 @@ class TargetSpecificLOBForecaster(nn.Module):
 # --- 4. Loss Functions ---
 
 class TargetSpecificStructuralLoss(nn.Module):
-    """Structural regularizer for target-specific predictions."""
+    """Structural regularizer for target predictions."""
     def __init__(self, embedding_metadata, target_feature_indices):
         super().__init__()
         self.metadata = embedding_metadata
