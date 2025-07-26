@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 CONFIG = {
     'data_path': 'data/full_lob_data/resampled_5s',  # Updated to use full dataset
     'output_path': 'data/final_attention',
-    'context_length': 240,  # 240 steps * 5s = 20 minutes (matches paper)
+    'context_length': 120,  # 120 steps * 5s = 10 minutes (matches paper)
     'target_length': 24,    # 24 steps * 5s = 2 minutes
     'lob_levels': 5,
     'train_ratio': 0.6,
@@ -56,8 +56,9 @@ CONFIG = {
     'test_ratio': 0.2,
     'exchanges': ['binance_spot', 'binance_perp', 'bybit_spot'],
     'trading_pairs': ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'WLD-USDT'],
-    'min_session_length': 300,  # Minimum 300 steps (25 minutes) for valid sequences with 20min context
-    'overlap_ratio': 0.5  # 50% overlap between sequences
+    'min_session_length': 144,  # Minimum 144 steps (12 minutes) - just enough for 1 sequence
+    'overlap_ratio': 0.9,  # 90% overlap for maximum sequence generation
+    'max_gap_minutes': 60  # Allow longer gaps between sessions
 }
 
 def load_resampled_data() -> Dict[str, pd.DataFrame]:
@@ -153,17 +154,25 @@ def apply_percent_change_transformation(df: pd.DataFrame) -> pd.DataFrame:
     logger.info(f"Applied percent-change transformation to {len(price_columns)} price columns")
     return df_transformed
 
-def detect_sessions(df: pd.DataFrame, max_gap_minutes: int = 30) -> List[Tuple[int, int]]:
+def detect_sessions(df: pd.DataFrame, max_gap_minutes: int = None) -> List[Tuple[int, int]]:
     """Detect continuous sessions based on time gaps."""
     if len(df) == 0:
         return []
     
-    # Convert timestamp to datetime if it's not already
-    if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
+    if max_gap_minutes is None:
+        max_gap_minutes = CONFIG['max_gap_minutes']
+    
+    # Handle timestamp column or index
+    if 'timestamp' in df.columns:
+        timestamps = pd.to_datetime(df['timestamp'])
+    else:
+        # Timestamp is likely in the index
+        timestamps = df.index
+        if not pd.api.types.is_datetime64_any_dtype(timestamps):
+            timestamps = pd.to_datetime(timestamps)
     
     # Calculate time differences
-    time_diffs = df['timestamp'].diff()
+    time_diffs = timestamps.diff()
     
     # Find gaps larger than max_gap_minutes
     gap_threshold = pd.Timedelta(minutes=max_gap_minutes)
@@ -171,7 +180,8 @@ def detect_sessions(df: pd.DataFrame, max_gap_minutes: int = 30) -> List[Tuple[i
     
     # Find session boundaries
     session_starts = [0]  # First row is always a session start
-    session_starts.extend(df.index[large_gaps].tolist())
+    gap_indices = [i for i, gap in enumerate(large_gaps) if gap]
+    session_starts.extend(gap_indices)
     
     sessions = []
     for i in range(len(session_starts)):
