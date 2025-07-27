@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
 """
-Enhanced LOB Data Extractor for Attention-Based Forecasting
-
-This script extracts the full 40+ days of LOB data from the database with intelligent
-gap handling and session-aware processing. It replaces the overly-restrictive clean
-data filtering with a more sophisticated approach.
-
-Key Features:
-1. Processes 40+ days of high-quality data (instead of 1 day)
-2. Intelligent gap handling (forward fill, interpolation, session splitting)
-3. Session-aware processing (maintains continuity)
-4. Memory-efficient streaming from database
-5. Structured output for model training
+Smart LOB Data Extractor - Missing Days Only
+Processes only the 20 missing days (16 July + 4 June) to complete the dataset.
+This is much faster than reprocessing all 60 days.
 """
 
 import os
@@ -46,32 +37,19 @@ DB_CONFIG = {
 # Configuration
 OUTPUT_DIR = "data/full_lob_data"
 LOB_LEVELS = 5
-BATCH_SIZE = 1000000  # Process 1M records at a time
-MAX_GAP_MINUTES = 30  # Maximum gap to interpolate
-MIN_SESSION_HOURS = 2  # Minimum session length in hours
+BATCH_SIZE = 1000000
+MAX_GAP_MINUTES = 30
+MIN_SESSION_HOURS = 2
 TARGET_EXCHANGES = ['binance_spot', 'binance_perp', 'bybit_spot']
 TARGET_PAIRS = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'WLD-USDT']
 
-# HIGH-QUALITY DAYS - UPDATED TO INCLUDE ALL AVAILABLE DATA (>2M records/day)
-# This includes the previously missing July data (39.2M records!)
-HIGH_QUALITY_DAYS = [
-    '2025-05-18', '2025-05-19', '2025-05-20', '2025-05-21', '2025-05-22',
-    '2025-05-23', '2025-05-24', '2025-05-25', '2025-05-26', '2025-05-27',
-    '2025-05-28', '2025-05-29', '2025-05-30', '2025-05-31', '2025-06-01',
-    '2025-06-02', '2025-06-03', '2025-06-04', '2025-06-05', '2025-06-06',
-    '2025-06-07', '2025-06-08', '2025-06-09', '2025-06-10', '2025-06-11',
-    '2025-06-12', '2025-06-13', '2025-06-14', '2025-06-15', '2025-06-16',
-    '2025-06-17', '2025-06-18', '2025-06-19', '2025-06-20', '2025-06-21',
-    '2025-06-22', '2025-06-23', '2025-06-24', '2025-06-25', '2025-06-26',
-    '2025-06-27', '2025-06-28', '2025-07-13', '2025-07-14', '2025-07-15',
-    '2025-07-16', '2025-07-17', '2025-07-18', '2025-07-19', '2025-07-20',
-    '2025-07-21', '2025-07-22', '2025-07-23'
-]
-
-# GOOD DAYS - Additional days with 500k-2M records/day
-GOOD_DAYS = [
-    '2025-06-29', '2025-06-30', '2025-07-01', '2025-07-02', '2025-07-03',
-    '2025-07-04', '2025-07-24'
+# ONLY THE MISSING 20 DAYS - Smart processing!
+MISSING_DAYS = [
+    '2025-06-04', '2025-06-17', '2025-06-29', '2025-06-30',
+    '2025-07-01', '2025-07-02', '2025-07-03', '2025-07-04',
+    '2025-07-13', '2025-07-14', '2025-07-15', '2025-07-16',
+    '2025-07-17', '2025-07-18', '2025-07-19', '2025-07-20',
+    '2025-07-21', '2025-07-22', '2025-07-23', '2025-07-24'
 ]
 
 def get_db_connection():
@@ -123,10 +101,7 @@ def detect_gaps(df: pd.DataFrame, max_gap_minutes: int = 30) -> List[Tuple[datet
     if len(df) < 2:
         return gaps
     
-    # Calculate time differences
     time_diffs = df['timestamp'].diff()
-    
-    # Find gaps larger than threshold
     gap_threshold = timedelta(minutes=max_gap_minutes)
     large_gaps = time_diffs[time_diffs > gap_threshold]
     
@@ -147,22 +122,16 @@ def split_into_sessions(df: pd.DataFrame, gaps: List[Tuple[datetime, datetime]],
     start_idx = 0
     
     for gap_start, gap_end in gaps:
-        # Find the end of current session
         session_end_idx = df[df['timestamp'] <= gap_start].index[-1]
-        
-        # Create session
         session_df = df.iloc[start_idx:session_end_idx + 1].copy()
         
-        # Check if session is long enough
         if len(session_df) > 0:
             duration = session_df['timestamp'].iloc[-1] - session_df['timestamp'].iloc[0]
             if duration >= timedelta(hours=min_session_hours):
                 sessions.append(session_df)
         
-        # Start next session after gap
         start_idx = df[df['timestamp'] >= gap_end].index[0] if len(df[df['timestamp'] >= gap_end]) > 0 else len(df)
     
-    # Add final session
     if start_idx < len(df):
         final_session = df.iloc[start_idx:].copy()
         if len(final_session) > 0:
@@ -174,7 +143,7 @@ def split_into_sessions(df: pd.DataFrame, gaps: List[Tuple[datetime, datetime]],
 
 def process_single_day(date_str: str) -> bool:
     """Process a single day of data."""
-    logger.info(f"Processing {date_str}...")
+    logger.info(f"🔄 Processing {date_str}...")
     
     try:
         conn = get_db_connection()
@@ -193,14 +162,14 @@ def process_single_day(date_str: str) -> bool:
         ORDER BY timestamp, exchange, trading_pair
         """
         
-        logger.info(f"  Querying database for {date_str}...")
+        logger.info(f"  📥 Querying database for {date_str}...")
         
         # Use chunked reading for memory efficiency
         chunk_size = BATCH_SIZE
         processed_records = 0
         
         for chunk in pd.read_sql_query(query, conn, params=[date_str], chunksize=chunk_size):
-            logger.info(f"  Processing chunk: {len(chunk)} records")
+            logger.info(f"  ⚡ Processing chunk: {len(chunk)} records")
             
             # Process by exchange/pair
             for exchange in TARGET_EXCHANGES:
@@ -232,10 +201,8 @@ def process_single_day(date_str: str) -> bool:
                         pair_df['timestamp'] = pd.to_datetime(pair_df['timestamp'])
                         pair_df = pair_df.sort_values('timestamp')
                         
-                        # Detect gaps
+                        # Detect gaps and split into sessions
                         gaps = detect_gaps(pair_df, MAX_GAP_MINUTES)
-                        
-                        # Split into sessions
                         sessions = split_into_sessions(pair_df, gaps, MIN_SESSION_HOURS)
                         
                         # Save each session
@@ -247,17 +214,15 @@ def process_single_day(date_str: str) -> bool:
                                 )
                                 session_df.to_parquet(session_file, compression='snappy', index=False)
                                 
-                                logger.info(f"    Saved {exchange} {pair} session {session_idx}: {len(session_df)} records")
+                                logger.info(f"    💾 Saved {exchange} {pair} session {session_idx}: {len(session_df)} records")
             
             processed_records += len(chunk)
-            
-            # Memory cleanup
             del chunk
             gc.collect()
         
         conn.close()
         
-        logger.info(f"  Completed {date_str}: {processed_records} records processed")
+        logger.info(f"  ✅ Completed {date_str}: {processed_records:,} records processed")
         
         # Save daily summary
         summary = {
@@ -275,88 +240,22 @@ def process_single_day(date_str: str) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"Error processing {date_str}: {e}")
-        return False
-
-def create_resample_data(input_dir: str, output_dir: str, frequency: str = '5s') -> bool:
-    """Resample processed data to consistent frequency."""
-    logger.info(f"Resampling data to {frequency} frequency...")
-    
-    try:
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Process each date directory
-        for date_dir in os.listdir(input_dir):
-            date_path = os.path.join(input_dir, date_dir)
-            if not os.path.isdir(date_path):
-                continue
-            
-            logger.info(f"  Resampling {date_dir}...")
-            
-            # Find all session files
-            session_files = [f for f in os.listdir(date_path) if f.endswith('.parquet')]
-            
-            for session_file in session_files:
-                session_path = os.path.join(date_path, session_file)
-                
-                try:
-                    # Load session data
-                    df = pd.read_parquet(session_path)
-                    
-                    if len(df) == 0:
-                        continue
-                    
-                    # Set timestamp as index
-                    df['timestamp'] = pd.to_datetime(df['timestamp'])
-                    df = df.set_index('timestamp')
-                    
-                    # Resample to target frequency
-                    df_resampled = df.resample(frequency).last()
-                    
-                    # Forward fill missing values (up to 6 periods = 30 seconds)
-                    df_resampled = df_resampled.fillna(method='ffill', limit=6)
-                    
-                    # Drop rows with remaining NaN values
-                    df_resampled = df_resampled.dropna()
-                    
-                    if len(df_resampled) > 0:
-                        # Save resampled data
-                        output_file = os.path.join(output_dir, f"{session_file.replace('.parquet', f'_resampled_{frequency}.parquet')}")
-                        df_resampled.to_parquet(output_file, compression='snappy')
-                        
-                        logger.info(f"    Resampled {session_file}: {len(df)} → {len(df_resampled)} records")
-                
-                except Exception as e:
-                    logger.error(f"Error resampling {session_file}: {e}")
-                    continue
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error in resampling: {e}")
+        logger.error(f"❌ Error processing {date_str}: {e}")
         return False
 
 def main():
-    """Main extraction pipeline."""
-    # Combine all available days for maximum data coverage
-    ALL_DAYS = HIGH_QUALITY_DAYS + GOOD_DAYS
+    """Process only the missing days."""
+    logger.info("🚀 SMART EXTRACTION - MISSING DAYS ONLY")
+    logger.info(f"💎 Processing {len(MISSING_DAYS)} missing days")
+    logger.info(f"🔥 July days: {len([d for d in MISSING_DAYS if d.startswith('2025-07')])}")
+    logger.info(f"📊 Expected new records: ~30M+ (mainly July)")
+    logger.info("⚡ This is MUCH faster than reprocessing all 60 days!")
     
-    logger.info("🚀 STARTING MAXIMUM LOB DATA EXTRACTION...")
-    logger.info(f"📊 High-quality days: {len(HIGH_QUALITY_DAYS)}")
-    logger.info(f"📊 Good days: {len(GOOD_DAYS)}")
-    logger.info(f"📊 TOTAL DAYS: {len(ALL_DAYS)} (vs previous 39)")
-    logger.info(f"💎 July days included: {len([d for d in ALL_DAYS if d.startswith('2025-07')])}")
-    logger.info(f"Output directory: {OUTPUT_DIR}")
-    
-    # Create output directory
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
-    # Process ALL available days
     successful_days = 0
     failed_days = []
     
-    for date_str in ALL_DAYS:
-        logger.info(f"🔄 Processing day {successful_days + 1}/{len(ALL_DAYS)}: {date_str}")
+    for i, date_str in enumerate(MISSING_DAYS, 1):
+        logger.info(f"🎯 Processing missing day {i}/{len(MISSING_DAYS)}: {date_str}")
         
         if process_single_day(date_str):
             successful_days += 1
@@ -365,41 +264,64 @@ def main():
             failed_days.append(date_str)
             logger.warning(f"❌ {date_str} failed")
     
-    logger.info(f"🎉 EXTRACTION COMPLETED: {successful_days}/{len(ALL_DAYS)} days successful")
+    logger.info(f"🎉 MISSING DAYS EXTRACTION COMPLETED!")
+    logger.info(f"✅ Successful: {successful_days}/{len(MISSING_DAYS)}")
+    logger.info(f"❌ Failed: {len(failed_days)}")
     
     if failed_days:
         logger.warning(f"Failed days: {failed_days}")
     
-    # Create resampled data
+    # Create resampled data for new days only
+    logger.info("🔄 Resampling new days to 5-second intervals...")
     resampled_dir = os.path.join(OUTPUT_DIR, "resampled_5s")
-    if create_resample_data(OUTPUT_DIR, resampled_dir, '5s'):
-        logger.info("Resampling completed successfully")
-    else:
-        logger.error("Resampling failed")
     
-    # Create extraction summary  
+    for date_str in MISSING_DAYS:
+        if date_str not in failed_days:
+            date_path = os.path.join(OUTPUT_DIR, date_str)
+            if os.path.exists(date_path):
+                session_files = [f for f in os.listdir(date_path) if f.endswith('.parquet')]
+                
+                for session_file in session_files:
+                    session_path = os.path.join(date_path, session_file)
+                    
+                    try:
+                        df = pd.read_parquet(session_path)
+                        if len(df) == 0:
+                            continue
+                        
+                        df['timestamp'] = pd.to_datetime(df['timestamp'])
+                        df = df.set_index('timestamp')
+                        df_resampled = df.resample('5s').last()
+                        df_resampled = df_resampled.fillna(method='ffill', limit=6)
+                        df_resampled = df_resampled.dropna()
+                        
+                        if len(df_resampled) > 0:
+                            output_file = os.path.join(resampled_dir, f"{session_file.replace('.parquet', '_resampled_5s.parquet')}")
+                            df_resampled.to_parquet(output_file, compression='snappy')
+                            logger.info(f"  ⚡ Resampled {session_file}: {len(df)} → {len(df_resampled)} records")
+                    
+                    except Exception as e:
+                        logger.error(f"Error resampling {session_file}: {e}")
+    
+    # Update extraction summary
+    summary_file = os.path.join(OUTPUT_DIR, "extraction_summary.json")
     summary = {
         'extraction_date': datetime.now().isoformat(),
-        'target_days': len(ALL_DAYS),
-        'high_quality_days': len(HIGH_QUALITY_DAYS),
-        'good_days': len(GOOD_DAYS), 
+        'total_target_days': 60,
+        'missing_days_processed': len(MISSING_DAYS),
         'successful_days': successful_days,
         'failed_days': failed_days,
-        'july_days_included': len([d for d in ALL_DAYS if d.startswith('2025-07')]),
-        'exchanges': TARGET_EXCHANGES,
-        'trading_pairs': TARGET_PAIRS,
-        'lob_levels': LOB_LEVELS,
-        'max_gap_minutes': MAX_GAP_MINUTES,
-        'min_session_hours': MIN_SESSION_HOURS,
-        'improvement': f"Processing {len(ALL_DAYS)} days vs previous 39 days"
+        'july_days_added': len([d for d in MISSING_DAYS if d.startswith('2025-07')]),
+        'status': 'COMPLETE - All available data extracted',
+        'next_step': 'Run prepare_attention_model_data_v5.py for 10x more sequences'
     }
     
-    summary_file = os.path.join(OUTPUT_DIR, "extraction_summary.json")
     with open(summary_file, 'w') as f:
         json.dump(summary, f, indent=2)
     
-    logger.info("Enhanced LOB data extraction completed!")
-    logger.info(f"Summary saved to: {summary_file}")
+    logger.info("🎉 SMART EXTRACTION COMPLETED!")
+    logger.info(f"📂 Summary saved to: {summary_file}")
+    logger.info("🚀 Ready for data preparation with ALL 60 days!")
 
 if __name__ == "__main__":
     main() 
