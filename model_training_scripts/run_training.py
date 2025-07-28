@@ -65,10 +65,20 @@ def get_script_paths(timeframes, pairs):
     """Get list of script paths based on timeframes and pairs."""
     script_paths = []
     
+    # Determine the base directory for scripts
+    current_dir = os.getcwd()
+    if current_dir.endswith("model_training_scripts"):
+        # Running from within model_training_scripts directory
+        base_path = ""
+    else:
+        # Running from main project directory
+        base_path = "model_training_scripts"
+    
     for timeframe in timeframes:
         for pair in pairs:
             script_name = f"train_{timeframe}min_binance_perp_{pair}.py"
             script_path = os.path.join(
+                base_path,
                 f"{timeframe}min_predictions", 
                 script_name
             )
