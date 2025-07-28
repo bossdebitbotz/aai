@@ -23,21 +23,23 @@ from tqdm import tqdm
 import math
 from datetime import datetime
 
-# --- CORRECTED CONFIGURATION ---
+# --- H100 BEAST MODE CONFIGURATION ---
 FINAL_DATA_DIR = "data/final_attention"
-MODEL_SAVE_DIR = "models/working_scaled_corrected"  # New directory for corrected model
-BATCH_SIZE = 32
-LEARNING_RATE = 1e-4
-WARMUP_STEPS = 1000
+MODEL_SAVE_DIR = "models/working_scaled_h100_beast"  # New beast mode directory
+BATCH_SIZE = 128  # 🚀 4x LARGER: Utilize H100 memory (18GB → 70GB)
+GRADIENT_ACCUMULATION_STEPS = 2  # 🚀 EFFECTIVE BATCH = 256
+LEARNING_RATE = 2e-4  # 🚀 HIGHER: Scale with batch size
+WARMUP_STEPS = 2000   # 🚀 LONGER: More stable with large batches
 EPOCHS = 50
 PATIENCE = 8
-EMBED_DIM = 256
-NUM_HEADS = 8
-NUM_ENCODER_LAYERS = 6
-NUM_DECODER_LAYERS = 4
+EMBED_DIM = 512       # 🚀 2x LARGER: Use H100 compute power
+NUM_HEADS = 16        # 🚀 2x MORE: Scale with embed_dim
+NUM_ENCODER_LAYERS = 8  # 🚀 DEEPER: More H100 compute
+NUM_DECODER_LAYERS = 6  # 🚀 DEEPER: More H100 compute  
 DROPOUT = 0.1
 TARGET_LEN = 24  # ✅ CORRECTED: Must match data target_length (was 12)
-NUM_WORKERS = 16
+NUM_WORKERS = 32      # 🚀 2x MORE: Feed those GPUs faster
+COMPILE_MODEL = True  # 🚀 H100 OPTIMIZATION: torch.compile for 20% speedup
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -328,7 +330,7 @@ def main():
     )
     val_loader = DataLoader(
         val_dataset, 
-        batch_size=BATCH_SIZE, 
+        batch_size=BATCH_SIZE,  # 🚀 Same large batch for validation
         shuffle=False,
         num_workers=NUM_WORKERS, 
         pin_memory=True,
@@ -359,8 +361,15 @@ def main():
     
     model = model.to(DEVICE)
 
+    # 🚀 H100 BEAST MODE: Compile model for 20%+ speedup
+    if COMPILE_MODEL and hasattr(torch, 'compile'):
+        logger.info("🚀 Compiling model for H100 optimization...")
+        model = torch.compile(model, mode='max-autotune')
+        logger.info("✅ Model compiled successfully")
+
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Total parameters: {total_params:,}")
+    logger.info(f"🚀 H100 Beast Mode: {EMBED_DIM}D model, batch {BATCH_SIZE}, effective batch {BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS}")
 
     # --- TRADING-FOCUSED Loss Functions & Optimizer ---
     mse_loss_fn = nn.MSELoss()
@@ -386,19 +395,21 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     scaler = GradScaler()
 
-    # --- Training Loop ---
-    logger.info(f"Starting CORRECTED training for {EPOCHS} epochs...")
+    # --- H100 BEAST MODE Training Loop ---
+    logger.info(f"Starting H100 BEAST MODE training for {EPOCHS} epochs...")
+    logger.info(f"🚀 Effective batch size: {BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS}")
     os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
     best_val_loss = float('inf')
     patience_counter = 0
 
     for epoch in range(1, EPOCHS + 1):
-        # Training
+        # Training with gradient accumulation
         model.train()
         total_loss = 0.0
+        accumulation_loss = 0.0
         
-        with tqdm(train_loader, desc=f"Epoch {epoch}") as pbar:
+        with tqdm(train_loader, desc=f"H100 Beast Epoch {epoch}") as pbar:
             for batch_idx, (context, target) in enumerate(pbar):
                 context, target = context.to(DEVICE, non_blocking=True), target.to(DEVICE, non_blocking=True)
                 
@@ -409,25 +420,43 @@ def main():
                 with autocast('cuda'):
                     predictions = model(context, decoder_input)
                     total_loss_val, mse_loss_val, direction_loss_val = trading_loss_fn(predictions, target)
+                    # Scale loss for gradient accumulation
+                    total_loss_val = total_loss_val / GRADIENT_ACCUMULATION_STEPS
                 
-                optimizer.zero_grad()
+                # Accumulate gradients
                 scaler.scale(total_loss_val).backward()
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                scaler.step(optimizer)
-                scaler.update()
+                accumulation_loss += total_loss_val.item()
                 
-                total_loss += total_loss_val.item()
+                # Update every GRADIENT_ACCUMULATION_STEPS batches
+                if (batch_idx + 1) % GRADIENT_ACCUMULATION_STEPS == 0:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad()
+                    
+                    total_loss += accumulation_loss
+                    accumulation_loss = 0.0
                 
                 current_lr = optimizer.param_groups[0]['lr']
                 pbar.set_postfix({
-                    'Total': f'{total_loss_val.item():.4f}',
+                    'Total': f'{total_loss_val.item() * GRADIENT_ACCUMULATION_STEPS:.4f}',
                     'MSE': f'{mse_loss_val.item():.6f}',
                     'Dir': f'{direction_loss_val.item():.4f}',
-                    'LR': f'{current_lr:.2e}'
+                    'LR': f'{current_lr:.2e}',
+                    'EffBatch': BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS
                 })
         
-        train_loss = total_loss / len(train_loader)
+        # 🚀 H100 Beast: Handle any remaining accumulated gradients
+        if accumulation_loss > 0:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
+            total_loss += accumulation_loss
+        
+        train_loss = total_loss / max(1, len(train_loader) // GRADIENT_ACCUMULATION_STEPS)
         
         # Validation with TRADING-FOCUSED metrics
         model.eval()
