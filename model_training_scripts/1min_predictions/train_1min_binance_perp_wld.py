@@ -26,15 +26,15 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 # --- Configuration ---
 FINAL_DATA_DIR = "data/final_attention"
 MODEL_SAVE_DIR = "models/1min_binance_perp_wld"
-BATCH_SIZE = 4
+BATCH_SIZE = 1  # Reduced for memory efficiency
 LEARNING_RATE = 1e-4
 WARMUP_STEPS = 1000
 EPOCHS = 50
 PATIENCE = 5
-EMBED_DIM = 126  # Divisible by 3 heads
+EMBED_DIM = 64   # Reduced for memory efficiency
 NUM_HEADS = 3
-NUM_ENCODER_LAYERS = 3
-NUM_DECODER_LAYERS = 3
+NUM_ENCODER_LAYERS = 2  # Reduced for memory efficiency
+NUM_DECODER_LAYERS = 2  # Reduced for memory efficiency
 DROPOUT = 0.1
 REG_WEIGHT = 0.01  # Structural regularizer weight
 
