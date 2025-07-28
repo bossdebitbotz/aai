@@ -59,8 +59,8 @@ class FullToBinancePerpDataset(Dataset):
     """Dataset for full market → WLD perp prediction."""
     def __init__(self, file_path, target_feature_indices, target_steps=36):
         with np.load(file_path, allow_pickle=True) as data:
-            self.context = torch.from_numpy(data['x']).float()
-            self.target_full = torch.from_numpy(data['y']).float()
+            self.context = torch.from_numpy(data['contexts']).float()
+            self.target_full = torch.from_numpy(data['targets']).float()
             
             # Handle variable target length
             current_target_len = self.target_full.shape[1]  # Current is 24

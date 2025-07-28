@@ -63,9 +63,9 @@ class TargetSpecificLOBDataset(Dataset):
         self.target_steps = target_steps
         
         with np.load(file_path) as data:
-            self.len = data['x'].shape[0]
-            self.x_shape = data['x'].shape
-            self.original_y_shape = data['y'].shape
+            self.len = data['contexts'].shape[0]
+            self.x_shape = data['contexts'].shape
+            self.original_y_shape = data['targets'].shape
             
         # New target shape: only target features, specific time steps
         self.y_shape = (self.len, self.target_steps, len(self.target_feature_indices))
@@ -75,8 +75,8 @@ class TargetSpecificLOBDataset(Dataset):
 
     def __getitem__(self, idx):
         with np.load(self.file_path) as data:
-            x = data['x'][idx]  # All features as input
-            y_full = data['y'][idx]  # Original target (24 steps, all features)
+            x = data['contexts'][idx]  # All features as input
+            y_full = data['targets'][idx]  # Original target (24 steps, all features)
             
             # Extract only target features and truncate/pad to target steps
             y_target = y_full[:, self.target_feature_indices]  # (24, target_features)
