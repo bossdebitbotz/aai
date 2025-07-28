@@ -23,23 +23,23 @@ from tqdm import tqdm
 import math
 from datetime import datetime
 
-# --- H100 BEAST MODE CONFIGURATION ---
+# --- H100 SMART MODE CONFIGURATION ---
 FINAL_DATA_DIR = "data/final_attention"
-MODEL_SAVE_DIR = "models/working_scaled_h100_beast"  # New beast mode directory
-BATCH_SIZE = 128  # 🚀 4x LARGER: Utilize H100 memory (18GB → 70GB)
-GRADIENT_ACCUMULATION_STEPS = 2  # 🚀 EFFECTIVE BATCH = 256
-LEARNING_RATE = 2e-4  # 🚀 HIGHER: Scale with batch size
-WARMUP_STEPS = 2000   # 🚀 LONGER: More stable with large batches
+MODEL_SAVE_DIR = "models/working_scaled_h100_smart"  # H100 smart mode directory
+BATCH_SIZE = 64   # 🎯 SMART: 2x larger, won't OOM
+GRADIENT_ACCUMULATION_STEPS = 2  # 🎯 EFFECTIVE BATCH = 128
+LEARNING_RATE = 1.5e-4  # 🎯 SCALED: Moderate increase
+WARMUP_STEPS = 1500     # 🎯 BALANCED: Stable training
 EPOCHS = 50
 PATIENCE = 8
-EMBED_DIM = 512       # 🚀 2x LARGER: Use H100 compute power
-NUM_HEADS = 16        # 🚀 2x MORE: Scale with embed_dim
-NUM_ENCODER_LAYERS = 8  # 🚀 DEEPER: More H100 compute
-NUM_DECODER_LAYERS = 6  # 🚀 DEEPER: More H100 compute  
+EMBED_DIM = 384       # 🎯 SWEET SPOT: 1.5x larger (not 2x)
+NUM_HEADS = 12        # 🎯 BALANCED: 1.5x more heads
+NUM_ENCODER_LAYERS = 7  # 🎯 SMART: +1 layer (not +2)
+NUM_DECODER_LAYERS = 5  # 🎯 SMART: +1 layer (not +2)
 DROPOUT = 0.1
 TARGET_LEN = 24  # ✅ CORRECTED: Must match data target_length (was 12)
-NUM_WORKERS = 32      # 🚀 2x MORE: Feed those GPUs faster
-COMPILE_MODEL = True  # 🚀 H100 OPTIMIZATION: torch.compile for 20% speedup
+NUM_WORKERS = 24      # 🎯 BALANCED: More workers, not crazy
+COMPILE_MODEL = False  # 🚨 DISABLE: torch.compile adds memory overhead
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -361,15 +361,17 @@ def main():
     
     model = model.to(DEVICE)
 
-    # 🚀 H100 BEAST MODE: Compile model for 20%+ speedup
+    # 🚨 DISABLED: torch.compile to save memory (was causing OOM)
     if COMPILE_MODEL and hasattr(torch, 'compile'):
         logger.info("🚀 Compiling model for H100 optimization...")
         model = torch.compile(model, mode='max-autotune')
         logger.info("✅ Model compiled successfully")
+    else:
+        logger.info("🚨 torch.compile disabled to save memory")
 
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Total parameters: {total_params:,}")
-    logger.info(f"🚀 H100 Beast Mode: {EMBED_DIM}D model, batch {BATCH_SIZE}, effective batch {BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS}")
+    logger.info(f"🎯 H100 Smart Mode: {EMBED_DIM}D model, batch {BATCH_SIZE}, effective batch {BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS}")
 
     # --- TRADING-FOCUSED Loss Functions & Optimizer ---
     mse_loss_fn = nn.MSELoss()
@@ -395,9 +397,9 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     scaler = GradScaler()
 
-    # --- H100 BEAST MODE Training Loop ---
-    logger.info(f"Starting H100 BEAST MODE training for {EPOCHS} epochs...")
-    logger.info(f"🚀 Effective batch size: {BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS}")
+    # --- H100 SMART MODE Training Loop ---
+    logger.info(f"Starting H100 SMART MODE training for {EPOCHS} epochs...")
+    logger.info(f"🎯 Effective batch size: {BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS}")
     os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
     best_val_loss = float('inf')
@@ -409,7 +411,7 @@ def main():
         total_loss = 0.0
         accumulation_loss = 0.0
         
-        with tqdm(train_loader, desc=f"H100 Beast Epoch {epoch}") as pbar:
+        with tqdm(train_loader, desc=f"H100 Smart Epoch {epoch}") as pbar:
             for batch_idx, (context, target) in enumerate(pbar):
                 context, target = context.to(DEVICE, non_blocking=True), target.to(DEVICE, non_blocking=True)
                 
@@ -447,7 +449,7 @@ def main():
                     'EffBatch': BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS
                 })
         
-        # 🚀 H100 Beast: Handle any remaining accumulated gradients
+        # 🎯 H100 Smart: Handle any remaining accumulated gradients
         if accumulation_loss > 0:
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
