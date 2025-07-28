@@ -31,8 +31,8 @@ LEARNING_RATE = 1e-4
 WARMUP_STEPS = 1000
 EPOCHS = 50
 PATIENCE = 5
-EMBED_DIM = 64   # Reduced for memory efficiency
-NUM_HEADS = 3
+EMBED_DIM = 64   # Reduced for memory efficiency  
+NUM_HEADS = 4    # 64/4 = 16 (divisible)
 NUM_ENCODER_LAYERS = 2  # Reduced for memory efficiency
 NUM_DECODER_LAYERS = 2  # Reduced for memory efficiency
 DROPOUT = 0.1
