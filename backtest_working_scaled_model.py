@@ -14,6 +14,7 @@ import json
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import math
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from scipy.stats import pearsonr
 from torch.utils.data import Dataset, DataLoader
@@ -239,21 +240,41 @@ def load_model_and_data():
     
     # Load checkpoint
     checkpoint = torch.load(MODEL_PATH, map_location='cpu')
-    model_config = checkpoint['model_config']
     
     print(f"  Model trained for {checkpoint['epoch']} epochs")
-    print(f"  Best validation loss: {checkpoint['val_loss']:.6f}")
+    print(f"  Best validation loss: {checkpoint.get('val_loss', checkpoint.get('best_val_loss', 'N/A')):.6f}")
+    
+    # Extract model configuration with fallbacks
+    if 'model_config' in checkpoint:
+        model_config = checkpoint['model_config']
+        print("  ✅ Found saved model config")
+    else:
+        # Use defaults based on train_working_scaled.py architecture
+        model_config = {
+            'embed_dim': 256,
+            'num_heads': 8,
+            'num_encoder_layers': 6,
+            'num_decoder_layers': 4
+        }
+        print("  ⚠️  No model config found, using defaults")
+    
+    # Determine target_steps from data or use default
+    target_steps = model_config.get('target_steps', 24)  # Default from train_working_scaled.py
+    
+    print(f"  📊 Model config: embed_dim={model_config.get('embed_dim', 256)}, "
+          f"heads={model_config.get('num_heads', 8)}, "
+          f"target_steps={target_steps}")
     
     # Recreate model
     model = ScaledMultiGPUForecaster(
         embedding_metadata=embedding_metadata,
         target_feature_indices=target_feature_indices,
-        embed_dim=model_config['embed_dim'],
-        num_heads=model_config['num_heads'],
-        num_encoder_layers=model_config['num_encoder_layers'],
-        num_decoder_layers=model_config['num_decoder_layers'],
+        embed_dim=model_config.get('embed_dim', 256),
+        num_heads=model_config.get('num_heads', 8),
+        num_encoder_layers=model_config.get('num_encoder_layers', 6),
+        num_decoder_layers=model_config.get('num_decoder_layers', 4),
         dropout=0.1,  # Not saved in config
-        target_len=model_config['target_steps'],
+        target_len=target_steps,
         num_target_features=len(target_feature_indices)
     )
     
@@ -266,7 +287,7 @@ def load_model_and_data():
     test_dataset = BacktestDataset(
         os.path.join(FINAL_DATA_DIR, 'test.npz'),
         target_feature_indices,
-        model_config['target_steps']
+        target_steps
     )
     
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
