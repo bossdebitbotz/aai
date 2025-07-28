@@ -159,11 +159,14 @@ def validate_wld_features(metadata):
     print(f"  ✅ Correct indices: {indices[0]}-{indices[-1]}")
     
     # Validate feature structure (5 bid levels + 5 ask levels, each with price + quantity)
+    # Extract level from column name (e.g., "bid_price_1" -> level 1)
     feature_types = {}
     for idx, name, info in wld_perp_features:
         order_type = info['order_type']  # bid or ask
         feature_type = info['feature_type']  # price or volume
-        level = info['level']
+        
+        # Extract level from column name (last character)
+        level = int(name.split('_')[-1])
         
         key = f"{order_type}_{feature_type}"
         if key not in feature_types:
