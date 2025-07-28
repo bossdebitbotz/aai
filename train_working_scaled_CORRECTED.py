@@ -50,18 +50,33 @@ logger.info(f"Using device: {DEVICE}")
 logger.info(f"Available GPUs: {num_gpus}")
 
 class WorkingScaledDataset(Dataset):
-    """Dataset properly configured for 24 time step targets."""
+    """Dataset properly configured for 24 time step targets with TRADING-FOCUSED preprocessing."""
     def __init__(self, file_path, target_feature_indices):
         with np.load(file_path, allow_pickle=True) as data:
             self.context = torch.from_numpy(data['contexts']).float()
             self.target_full = torch.from_numpy(data['targets']).float()
-            # ✅ CORRECTED: Use all 24 time steps, filter to 20 WLD features
-            self.target = self.target_full[:, :TARGET_LEN, target_feature_indices]
+            
+            # Get raw targets (absolute values)
+            raw_targets = self.target_full[:, :TARGET_LEN, target_feature_indices]
+            
+            # 🚨 CRITICAL FIX: Convert to PRICE CHANGES for trading prediction
+            # Use last context value as baseline for relative changes
+            last_context_values = self.context[:, -1, target_feature_indices].unsqueeze(1)  # (N, 1, 20)
+            
+            # Calculate relative changes: (target - baseline) / baseline
+            # This teaches the model to predict DIRECTION and MAGNITUDE of changes
+            self.target = (raw_targets - last_context_values) / (last_context_values + 1e-8)
+            
+            # Clip extreme outliers to stabilize training
+            self.target = torch.clamp(self.target, -0.1, 0.1)  # ±10% max change
+            
             self.len = self.context.shape[0]
             
         logger.info(f"Dataset loaded: {self.len} sequences")
         logger.info(f"Context shape: {self.context.shape}")
-        logger.info(f"Target shape: {self.target.shape}")
+        logger.info(f"Target shape (RELATIVE CHANGES): {self.target.shape}")
+        logger.info(f"Target range: [{self.target.min():.6f}, {self.target.max():.6f}]")
+        logger.info(f"Target std: {self.target.std():.6f}")
 
     def __len__(self):
         return self.len
@@ -347,8 +362,27 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Total parameters: {total_params:,}")
 
-    # --- Loss Functions & Optimizer ---
+    # --- TRADING-FOCUSED Loss Functions & Optimizer ---
     mse_loss_fn = nn.MSELoss()
+    
+    def trading_loss_fn(predictions, targets):
+        """Trading-focused loss that emphasizes directional accuracy."""
+        # Standard MSE for magnitude
+        mse_loss = mse_loss_fn(predictions, targets)
+        
+        # Directional loss: penalize when predicted and actual directions disagree
+        pred_directions = torch.sign(predictions)
+        target_directions = torch.sign(targets)
+        
+        # Directional accuracy bonus/penalty
+        direction_match = (pred_directions == target_directions).float()
+        direction_loss = 1.0 - direction_match.mean()
+        
+        # Combined loss: 70% direction, 30% magnitude
+        total_loss = 0.7 * direction_loss + 0.3 * mse_loss
+        
+        return total_loss, mse_loss, direction_loss
+    
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
     scaler = GradScaler()
 
@@ -374,29 +408,32 @@ def main():
                 
                 with autocast('cuda'):
                     predictions = model(context, decoder_input)
-                    loss = mse_loss_fn(predictions, target)
+                    total_loss_val, mse_loss_val, direction_loss_val = trading_loss_fn(predictions, target)
                 
                 optimizer.zero_grad()
-                scaler.scale(loss).backward()
+                scaler.scale(total_loss_val).backward()
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 scaler.step(optimizer)
                 scaler.update()
                 
-                total_loss += loss.item()
+                total_loss += total_loss_val.item()
                 
                 current_lr = optimizer.param_groups[0]['lr']
                 pbar.set_postfix({
-                    'Loss': f'{loss.item():.6f}',
-                    'LR': f'{current_lr:.2e}',
-                    'Target_Len': TARGET_LEN
+                    'Total': f'{total_loss_val.item():.4f}',
+                    'MSE': f'{mse_loss_val.item():.6f}',
+                    'Dir': f'{direction_loss_val.item():.4f}',
+                    'LR': f'{current_lr:.2e}'
                 })
         
         train_loss = total_loss / len(train_loader)
         
-        # Validation
+        # Validation with TRADING-FOCUSED metrics
         model.eval()
         total_val_loss = 0.0
+        total_val_mse = 0.0
+        total_val_direction = 0.0
         
         with torch.no_grad():
             for context, target in val_loader:
@@ -407,15 +444,20 @@ def main():
                 
                 with autocast('cuda'):
                     predictions = model(context, decoder_input)
-                    loss = mse_loss_fn(predictions, target)
+                    val_total_loss, val_mse_loss, val_direction_loss = trading_loss_fn(predictions, target)
                 
-                total_val_loss += loss.item()
+                total_val_loss += val_total_loss.item()
+                total_val_mse += val_mse_loss.item()
+                total_val_direction += val_direction_loss.item()
         
         val_loss = total_val_loss / len(val_loader)
+        val_mse = total_val_mse / len(val_loader)
+        val_direction = total_val_direction / len(val_loader)
         
         logger.info(f"Epoch {epoch}/{EPOCHS}")
         logger.info(f"Train Loss: {train_loss:.6f}")
-        logger.info(f"Val Loss: {val_loss:.6f}")
+        logger.info(f"Val Loss: {val_loss:.6f} (MSE: {val_mse:.6f}, Dir: {val_direction:.4f})")
+        logger.info(f"Val Directional Accuracy: {(1.0 - val_direction)*100:.2f}%")
         
         # Save best model
         if val_loss < best_val_loss:
