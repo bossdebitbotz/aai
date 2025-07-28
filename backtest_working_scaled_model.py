@@ -374,14 +374,14 @@ def calculate_metrics(predictions, targets):
     return_correlation = pearsonr(pred_returns.flatten(), target_returns.flatten())[0]
     
     metrics = {
-        'mse': mse,
-        'mae': mae,
-        'rmse': rmse,
-        'r2': r2,
-        'correlation': correlation,
-        'directional_accuracy': avg_directional_accuracy,
-        'return_correlation': return_correlation,
-        'total_predictions': len(pred_flat)
+        'mse': float(mse),
+        'mae': float(mae),
+        'rmse': float(rmse),
+        'r2': float(r2),
+        'correlation': float(correlation),
+        'directional_accuracy': float(avg_directional_accuracy),
+        'return_correlation': float(return_correlation),
+        'total_predictions': int(len(pred_flat))
     }
     
     # Print results
