@@ -226,15 +226,15 @@ class TargetSpecificLOBForecaster(nn.Module):
         batch_size, context_len, _ = src.shape
         target_len = tgt.shape[1]
         
-        src_flat = src_embedded.permute(0, 2, 1, 3).reshape(batch_size * self.num_input_features, context_len, self.embed_dim)
-        tgt_flat = tgt_embedded.permute(0, 2, 1, 3).reshape(batch_size * self.num_target_features, target_len, self.embed_dim)
+        src_flat = src_embedded.reshape(batch_size, context_len * self.num_input_features, self.embed_dim)
+        tgt_flat = tgt_embedded.reshape(batch_size, target_len * self.num_target_features, self.embed_dim)
         
         # Add positional encoding
         src_pos = self.positional_encoding(src_flat.permute(1, 0, 2)).permute(1, 0, 2)
         tgt_pos = self.positional_encoding(tgt_flat.permute(1, 0, 2)).permute(1, 0, 2)
         
         # Create target mask for decoder
-        tgt_mask = self.transformer.generate_square_subsequent_mask(target_len).to(DEVICE)
+        tgt_mask = self.transformer.generate_square_subsequent_mask(target_len * self.num_target_features).to(DEVICE)
         
         # Pass through transformer
         transformer_out = self.transformer(src_pos, tgt_pos, tgt_mask=tgt_mask)
@@ -243,7 +243,7 @@ class TargetSpecificLOBForecaster(nn.Module):
         output = self.output_layer(transformer_out)  # (batch*num_target_feat, target_len, 1)
         
         # Reshape back to target format
-        output = output.reshape(batch_size, self.num_target_features, target_len).permute(0, 2, 1)
+        output = output.squeeze(-1).reshape(batch_size, target_len, self.num_target_features)
         
         return output
 
