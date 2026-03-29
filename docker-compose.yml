@@ -1,0 +1,62 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    container_name: lob_timescaledb
+    environment:
+      POSTGRES_USER: lob_user
+      POSTGRES_PASSWORD: lob_password
+      POSTGRES_DB: lob_data
+    ports:
+      - "5432:5432"
+    volumes:
+      - lob_timescale_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command:
+      - postgres
+      - -c
+      - shared_buffers=8GB
+      - -c
+      - work_mem=256MB
+      - -c
+      - maintenance_work_mem=1GB
+      - -c
+      - effective_cache_size=24GB
+      - -c
+      - max_connections=100
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - min_wal_size=1GB
+      - -c
+      - synchronous_commit=off
+      - -c
+      - commit_delay=1000
+    restart: unless-stopped
+    shm_size: '4gb'
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+          cpus: '4'
+        reservations:
+          memory: 8G
+          cpus: '2'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lob_user -d lob_data"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  lob_timescale_data:
+    driver: local

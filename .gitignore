@@ -1,2 +1,14 @@
 .aider*
 lob_collector.log
+.env
+__pycache__/
+*.pyc
+.venv/
+data/
+data (1)/
+.DS_Store
+.mcp.json
+wallet/
+experiments/
+*.pt
+*.pth
