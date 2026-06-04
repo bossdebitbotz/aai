@@ -57,6 +57,17 @@ def build_copy_query(exchange: str, symbol: str, columns: list) -> str:
     )
 
 
+def strip_psql_tags(stdout: str) -> str:
+    """Drop leading psql command tags (e.g. 'SET\\nSET\\n') before the CSV header.
+
+    Each `-c "SET ..."` emits a 'SET' status line on stdout; with multiple SETs
+    a fixed single-prefix strip leaves stray lines that corrupt CSV parsing.
+    Slicing from the 'bucket,' header is robust to any number of leading tags.
+    """
+    hdr = stdout.find("bucket,")
+    return stdout[hdr:] if hdr > 0 else stdout
+
+
 def clear_stale_exports(output_dir, zip_path=None) -> int:
     """Delete existing parquet exports (and zip) so a re-run is truly fresh."""
     from pathlib import Path
@@ -96,15 +107,18 @@ def export_stream(exchange, symbol, columns):
     for attempt in range(1, MAX_RETRIES + 1):
         result = subprocess.run(
             ["docker", "exec", CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME,
-             "-c", "SET work_mem = '64MB'", "-c", copy_query],
+             "-c", "SET work_mem = '64MB'",
+             # Parallel workers allocate dynamic shared memory in the container's
+             # /dev/shm, which intermittently exhausts under concurrent collector
+             # load and fails the COPY ("could not resize shared memory segment").
+             # Force a serial plan; the sort spills to the (large) host data disk.
+             "-c", "SET max_parallel_workers_per_gather = 0",
+             "-c", copy_query],
             capture_output=True, text=True, timeout=600,
         )
 
         if result.returncode == 0:
-            csv_data = result.stdout
-            # Strip "SET\n" prefix from work_mem command
-            if csv_data.startswith("SET\n"):
-                csv_data = csv_data[4:]
+            csv_data = strip_psql_tags(result.stdout)
             if not csv_data.strip() or csv_data.count('\n') <= 1:
                 print(f"  {exchange}/{symbol}: no data, skipping")
                 return None

@@ -26,3 +26,11 @@ def test_clear_stale_exports(tmp_path):
     assert not f.exists() and not z.exists()
     assert removed == 2
     logger.info("PASS: test_clear_stale_exports")
+
+def test_strip_psql_tags_handles_multiple_sets():
+    body = "bucket,bid_price_1,spread\n1.0,2.0,0.1\n3.0,4.0,0.2\n"
+    # two SET tags (work_mem + max_parallel_workers_per_gather) precede the CSV
+    assert ex.strip_psql_tags("SET\nSET\n" + body) == body
+    assert ex.strip_psql_tags("SET\n" + body) == body      # single SET
+    assert ex.strip_psql_tags(body) == body                # no prefix
+    logger.info("PASS: test_strip_psql_tags_handles_multiple_sets")
