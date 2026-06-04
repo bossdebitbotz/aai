@@ -412,6 +412,7 @@ def build_dataloaders(
     test_datasets = []
     scalers = {}
     stream_info = {}
+    test_by_stream = {}
 
     for exchange in config.exchanges:
         for symbol in config.pairs:
@@ -428,60 +429,60 @@ def build_dataloaders(
                 )
                 continue
 
-            # Feature engineering (OFI, volume, price features + SG smoothing)
-            features, derived_names = engineer_features(
-                features, n_levels=config.lob_levels,
-                apply_smoothing=True, savgol_window=21, savgol_poly=3,
-            )
-            logger.info(f"  {key}: enriched {features.shape[1]} features ({len(derived_names)} derived)")
+            # --- Split FIRST (raw), then engineer features per split (leak-free) ---
+            from training.features_v2 import engineer_features_v2
+            fe = engineer_features_v2 if config.feature_version == "v2" else engineer_features
 
-            # Chronological split
             n = len(features)
             train_end = int(n * config.train_ratio)
             val_end = int(n * (config.train_ratio + config.val_ratio))
 
-            train_feat = features[:train_end]
-            val_feat = features[train_end:val_end]
-            test_feat = features[val_end:]
+            trim = config.warmup_trim
 
-            train_ts = timestamps[:train_end]
-            val_ts = timestamps[train_end:val_end]
-            test_ts = timestamps[val_end:]
+            def _fe_split(raw_slice, ts_slice):
+                if len(raw_slice) <= trim:
+                    return np.empty((0, config.n_enriched_features)), np.empty((0,))
+                enr, _ = fe(raw_slice, n_levels=config.lob_levels,
+                            apply_smoothing=True, savgol_window=config.savgol_window)
+                return enr[trim:], ts_slice[trim:]
 
-            # Fit scaler on training data only
+            train_feat, train_ts = _fe_split(features[:train_end], timestamps[:train_end])
+            val_feat, val_ts     = _fe_split(features[train_end:val_end], timestamps[train_end:val_end])
+            test_feat, test_ts   = _fe_split(features[val_end:], timestamps[val_end:])
+
+            logger.info(f"  {key}: enriched to {train_feat.shape[1] if len(train_feat) else 0} features")
+
+            # --- Fit scaler on TRAIN only; winsorize using train percentile bounds ---
             scaler = LOBScaler(n_levels=config.lob_levels)
-            train_scaled = scaler.fit_transform(train_feat)
-            val_scaled = scaler.transform(val_feat)
-            test_scaled = scaler.transform(test_feat)
+            if len(train_feat) < config.window_size:
+                logger.warning(f"  {key}: train split too small after trim, skipping.")
+                continue
+            lo = np.percentile(train_feat, 0.1, axis=0)
+            hi = np.percentile(train_feat, 99.9, axis=0)
+            train_feat = np.clip(train_feat, lo, hi)
+            val_feat = np.clip(val_feat, lo, hi) if len(val_feat) else val_feat
+            test_feat = np.clip(test_feat, lo, hi) if len(test_feat) else test_feat
 
+            train_scaled = scaler.fit_transform(train_feat)
+            val_scaled = scaler.transform(val_feat) if len(val_feat) else val_feat
+            test_scaled = scaler.transform(test_feat) if len(test_feat) else test_feat
             scalers[key] = scaler
 
-            # Create datasets
+            train_ds = None
             if len(train_scaled) >= config.window_size:
-                train_datasets.append(
-                    LOBDataset(train_scaled, train_ts, exchange, symbol, config)
-                )
+                train_ds = LOBDataset(train_scaled, train_ts, exchange, symbol, config)
+                train_datasets.append(train_ds)
             if len(val_scaled) >= config.window_size:
-                val_datasets.append(
-                    LOBDataset(val_scaled, val_ts, exchange, symbol, config)
-                )
+                val_datasets.append(LOBDataset(val_scaled, val_ts, exchange, symbol, config))
             if len(test_scaled) >= config.window_size:
-                test_datasets.append(
-                    LOBDataset(test_scaled, test_ts, exchange, symbol, config)
-                )
+                ds = LOBDataset(test_scaled, test_ts, exchange, symbol, config)
+                test_datasets.append(ds)
+                test_by_stream[key] = ds
 
             stream_info[key] = {
-                "total_samples": n,
-                "train_samples": len(train_feat),
-                "val_samples": len(val_feat),
-                "test_samples": len(test_feat),
-                "train_windows": len(train_datasets[-1]) if train_datasets and train_datasets[-1].exchange == exchange and train_datasets[-1].symbol == symbol else 0,
+                "total_samples": int(n),
+                "train_windows": len(train_ds) if train_ds is not None else 0,
             }
-
-            logger.info(
-                f"  {key}: {n} total, train={len(train_feat)}, "
-                f"val={len(val_feat)}, test={len(test_feat)}"
-            )
 
     loop.close()
 
@@ -518,6 +519,7 @@ def build_dataloaders(
         "n_train_windows": sum(len(ds) for ds in train_datasets),
         "n_val_windows": sum(len(ds) for ds in val_datasets),
         "n_test_windows": sum(len(ds) for ds in test_datasets),
+        "test_datasets_by_stream": test_by_stream,
     }
 
     return train_loader, val_loader, test_loader, metadata
