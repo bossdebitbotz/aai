@@ -32,6 +32,8 @@ DB_NAME = "lob_data"
 MAX_RETRIES = 3
 RETRY_WAIT = 30  # seconds to wait for DB recovery
 
+FRESH = True  # set by main(); --resume flips to False to keep existing exports
+
 
 def build_columns():
     cols = ["bucket"]
@@ -82,20 +84,14 @@ def wait_for_db():
 
 def export_stream(exchange, symbol, columns):
     """Export one stream via psql COPY, with retries."""
-    col_str = ", ".join(columns)
     fname = OUTPUT_DIR / f"{exchange}_{symbol}.parquet"
 
-    # Skip if already exported
-    if fname.exists() and fname.stat().st_size > 1000:
-        size_mb = fname.stat().st_size / 1024 / 1024
-        print(f"  {exchange}/{symbol}: already exported ({size_mb:.1f} MB), skipping")
+    if (not FRESH) and fname.exists() and fname.stat().st_size > 1000:
+        print(f"  {exchange}/{symbol}: keeping existing export (--resume)")
         return fname
 
-    copy_query = (
-        f"COPY (SELECT {col_str} FROM lob_5s "
-        f"WHERE exchange = '{exchange}' AND symbol = '{symbol}' "
-        f"ORDER BY bucket) TO STDOUT WITH CSV HEADER"
-    )
+    # NOTE: skip-guard removed; freshness is controlled by --fresh in main()
+    copy_query = build_copy_query(exchange, symbol, columns)
 
     for attempt in range(1, MAX_RETRIES + 1):
         result = subprocess.run(
@@ -132,8 +128,23 @@ def export_stream(exchange, symbol, columns):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Export lob_5s to parquet for Colab")
+    parser.add_argument("--fresh", action="store_true", default=True,
+                        help="Delete existing exports first (default).")
+    parser.add_argument("--resume", dest="fresh", action="store_false",
+                        help="Keep existing parquet files; only export missing streams.")
+    args = parser.parse_args()
+
+    global FRESH
+    FRESH = args.fresh
+
     OUTPUT_DIR.mkdir(exist_ok=True)
     columns = build_columns()
+
+    if args.fresh:
+        n = clear_stale_exports(OUTPUT_DIR, zip_path=Path(ZIP_NAME))
+        print(f"--fresh: removed {n} stale export file(s)")
 
     # Make sure DB is ready
     print("Waiting for DB...")
