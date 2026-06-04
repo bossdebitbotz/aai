@@ -54,11 +54,14 @@ class RunConfig:
 class ExperimentTracker:
     """Tracks training metrics and saves checkpoints."""
 
-    def __init__(self, experiment_dir: str, run_name: Optional[str] = None):
+    def __init__(self, experiment_dir: str, run_name: Optional[str] = None,
+                 monitor: str = "val_loss", monitor_mode: str = "min"):
         """
         Args:
             experiment_dir: base directory for all experiments
             run_name: name of this run (auto-generated if None)
+            monitor: metric key (from log_epoch entry/extra) used to select the best epoch
+            monitor_mode: "min" or "max" — direction of improvement for `monitor`
         """
         if run_name is None:
             run_name = datetime.now(timezone.utc).strftime("run_%Y%m%d_%H%M%S")
@@ -72,6 +75,9 @@ class ExperimentTracker:
         self.metrics: list[dict] = []
         self.best_val_loss = float("inf")
         self.best_epoch = -1
+        self.monitor = monitor
+        self.monitor_mode = monitor_mode
+        self.best_metric = float("inf") if monitor_mode == "min" else float("-inf")
         self._start_time = time.time()
 
         logger.info(f"Experiment tracker: {self.run_dir}")
@@ -128,13 +134,15 @@ class ExperimentTracker:
         self.metrics.append(entry)
         self._save_metrics()
 
-        # Check for best val loss
+        value = entry.get(self.monitor)
         is_best = False
-        if val_loss is not None and val_loss < self.best_val_loss:
-            self.best_val_loss = val_loss
-            self.best_epoch = epoch
-            is_best = True
-
+        if value is not None:
+            better = (value < self.best_metric) if self.monitor_mode == "min" else (value > self.best_metric)
+            if better:
+                self.best_metric = value
+                self.best_epoch = epoch
+                self.best_val_loss = entry.get("val_loss", self.best_val_loss)
+                is_best = True
         return is_best
 
     def save_checkpoint(
@@ -143,6 +151,7 @@ class ExperimentTracker:
         optimizer: torch.optim.Optimizer,
         epoch: int,
         is_best: bool = False,
+        extra: Optional[dict] = None,
     ):
         """Save model checkpoint."""
         checkpoint = {
@@ -151,7 +160,10 @@ class ExperimentTracker:
             "optimizer_state_dict": optimizer.state_dict(),
             "best_val_loss": self.best_val_loss,
             "best_epoch": self.best_epoch,
+            "best_metric": self.best_metric,
         }
+        if extra:
+            checkpoint.update(extra)
 
         # Always save latest
         latest_path = self.checkpoints_dir / "latest.pt"
