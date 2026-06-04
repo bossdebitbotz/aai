@@ -2,7 +2,7 @@
 """Held-out evaluation for the V2 directional model: per-horizon accuracy, confusion/PRF1,
 temperature calibration (reliability + ECE), confidence-vs-coverage. Also re-measures the
 V1 baseline directional accuracy on the same test split (sign of predicted mid change)."""
-import argparse, json, logging, pickle, sys
+import argparse, json, logging, sys
 from pathlib import Path
 import numpy as np
 import torch
@@ -75,9 +75,19 @@ def evaluate(run_dir: str, levels: int = 40, source: str = "db", parquet_dir: st
                      source=source, parquet_dir=parquet_dir)
     _, val_loader, test_loader, meta = build_dataloaders(cfg, batch_size=64)
 
+    # Read model architecture from the run's config.json (falls back to defaults).
+    arch = {"d_model": 66, "n_heads": 3, "n_layers": 3, "d_ff": 264}
+    cfg_path = run_dir / "config.json"
+    if cfg_path.exists():
+        saved = json.loads(cfg_path.read_text())
+        for k in arch:
+            if k in saved:
+                arch[k] = saved[k]
+
     model = CompoundAttentionModelV2(n_levels=levels, n_features=n_features,
                                      context_length=cfg.context_length, prediction_length=cfg.prediction_length,
-                                     d_model=66, n_heads=3, n_layers=3, d_ff=264).to(device)
+                                     d_model=arch["d_model"], n_heads=arch["n_heads"],
+                                     n_layers=arch["n_layers"], d_ff=arch["d_ff"]).to(device)
     ck = torch.load(run_dir / "checkpoints" / "best.pt", weights_only=False)
     model.load_state_dict(ck["model_state_dict"])
     loss_fn = LOBLossV2(n_levels=levels, mid_price_idx=ck.get("mid_price_idx", levels * 4),

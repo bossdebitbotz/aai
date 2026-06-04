@@ -13,4 +13,8 @@ def fetch_parquet_stream(parquet_dir, exchange, symbol, n_levels):
     feature_cols = _build_feature_columns(n_levels)
     feats = df[feature_cols].to_numpy(dtype=np.float64)
     ts = pd.to_datetime(df["bucket"]).astype("int64").to_numpy() / 1e9  # unix seconds
+    # Drop non-finite rows (data-quality filter parity with the DB path).
+    finite_rows = np.isfinite(feats).all(axis=1)
+    feats = feats[finite_rows]
+    ts = ts[finite_rows]
     return feats, ts

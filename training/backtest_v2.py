@@ -56,7 +56,6 @@ def _collect_window_signals(model, ds, loss_fn, device, temperature):
     at the primary horizon, one row per window."""
     from training.calibration import apply_temperature
     mid_idx = loss_fn.mid_price_idx
-    scaler = ds  # placeholder; real scaler passed separately
     entry, exitm, cls, conf, ts = [], [], [], [], []
     h_idx = min(PRIMARY_HORIZON_STEPS, ds.config.prediction_length - 1)
     horizons = list(loss_fn.direction_horizons)
@@ -88,9 +87,20 @@ def backtest(run_dir: str, levels: int = 40, source: str = "db", parquet_dir: st
     cfg = DataConfig(lob_levels=levels, feature_version="v2", savgol_window=11,
                      source=source, parquet_dir=parquet_dir)
     _, _, _, meta = build_dataloaders(cfg, batch_size=64)
+
+    # Read model architecture from the run's config.json (falls back to defaults).
+    arch = {"d_model": 66, "n_heads": 3, "n_layers": 3, "d_ff": 264}
+    cfg_path = run_dir / "config.json"
+    if cfg_path.exists():
+        saved = json.loads(cfg_path.read_text())
+        for k in arch:
+            if k in saved:
+                arch[k] = saved[k]
+
     model = CompoundAttentionModelV2(n_levels=levels, n_features=n_features,
                                      context_length=cfg.context_length, prediction_length=cfg.prediction_length,
-                                     d_model=66, n_heads=3, n_layers=3, d_ff=264).to(device)
+                                     d_model=arch["d_model"], n_heads=arch["n_heads"],
+                                     n_layers=arch["n_layers"], d_ff=arch["d_ff"]).to(device)
     ck = torch.load(run_dir / "checkpoints" / "best.pt", weights_only=False)
     model.load_state_dict(ck["model_state_dict"]); model.eval()
     loss_fn = LOBLossV2(n_levels=levels, mid_price_idx=ck.get("mid_price_idx", levels * 4),

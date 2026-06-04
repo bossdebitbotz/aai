@@ -171,12 +171,20 @@ def main():
         lob_levels=args.levels,
         exchanges=exchanges or DataConfig().exchanges,
         pairs=pairs or DataConfig().pairs,
+        feature_version="v1",
+        savgol_window=21,
     )
 
     # --- Step 1: Build DataLoaders ---
     logger.info("Building DataLoaders...")
     train_loader, val_loader, test_loader, metadata = build_dataloaders(
         data_config, batch_size=args.batch_size,
+    )
+
+    # Defensive guard: ensure the data pipeline produces the feature dim the model expects.
+    sample = next(iter(train_loader))
+    assert sample["context"].shape[-1] == n_features, (
+        f"feature dim {sample['context'].shape[-1]} != n_features {n_features}"
     )
 
     logger.info(
