@@ -51,6 +51,13 @@ class DataConfig:
     exchanges: list = None
     pairs: list = None
 
+    # Feature pipeline
+    feature_version: str = "v2"     # "v1" -> engineer_features; "v2" -> engineer_features_v2
+    savgol_window: int = 11         # V2 default (was hardcoded 21 in build_dataloaders)
+    # Data source
+    source: str = "db"              # "db" -> lob_5s; "parquet" -> parquet_dir
+    parquet_dir: str = "lob_data"
+
     def __post_init__(self):
         if self.exchanges is None:
             self.exchanges = [
@@ -75,8 +82,13 @@ class DataConfig:
 
     @property
     def n_enriched_features(self) -> int:
-        """Total features after engineer_features(): base (4N+2) + derived (N+9) = 5N+11."""
-        return self.lob_levels * 5 + 11
+        """base (4N+2) + derived. V1 derived=N+9 (=5N+11). V2 adds 8 momentum (=5N+19)."""
+        return self.lob_levels * 5 + (19 if self.feature_version == "v2" else 11)
+
+    @property
+    def warmup_trim(self) -> int:
+        """Rows to drop at the head of each split (largest feature lookback)."""
+        return max(self.savgol_window, 60)  # 60 = longest momentum horizon (log_return_60)
 
 
 # ---------------------------------------------------------------------------
