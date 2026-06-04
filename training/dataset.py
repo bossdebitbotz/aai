@@ -147,6 +147,10 @@ async def _fetch_stream_data(
         features: np.ndarray of shape (T, n_features) — float64
         timestamps: np.ndarray of shape (T,) — float64 unix timestamps
     """
+    if getattr(config, "source", "db") == "parquet":
+        from training.data_source import fetch_parquet_stream
+        return fetch_parquet_stream(config.parquet_dir, exchange, symbol, config.lob_levels)
+
     feature_cols = _build_feature_columns(config.lob_levels)
     col_str = ", ".join(feature_cols)
 
