@@ -157,6 +157,9 @@ async def _fetch_stream_data(
     # Filter out rows without full depth when training at >5 levels
     if config.lob_levels > 5:
         where_clauses.append(f"bid_price_{config.lob_levels} > 0")
+        where_clauses.append(f"ask_price_{config.lob_levels} > 0")
+        where_clauses.append("bid_price_1 > 0")
+        where_clauses.append("ask_price_1 > 0")
 
     if start_time:
         where_clauses.append(f"bucket >= ${idx}")
@@ -197,6 +200,13 @@ async def _fetch_stream_data(
         for j, col in enumerate(feature_cols):
             val = row[col]
             features[i, j] = val if val is not None else 0.0
+
+    finite_rows = np.isfinite(features).all(axis=1)
+    dropped = int((~finite_rows).sum())
+    if dropped:
+        logger.warning(f"  {exchange}/{symbol}: dropped {dropped} non-finite rows")
+        features = features[finite_rows]
+        timestamps = timestamps[finite_rows]
 
     return features, timestamps
 
