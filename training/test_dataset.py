@@ -41,12 +41,12 @@ def test_feature_columns():
 
 def test_data_config():
     """Test DataConfig feature count properties."""
-    config_5 = DataConfig(lob_levels=5)
+    config_5 = DataConfig(lob_levels=5, feature_version="v1")
     assert config_5.n_base_features == 20
     assert config_5.n_features == 22  # 4*5 + 2
     assert config_5.n_enriched_features == 36  # 5*5 + 11
 
-    config_40 = DataConfig(lob_levels=40)
+    config_40 = DataConfig(lob_levels=40, feature_version="v1")
     assert config_40.n_base_features == 160
     assert config_40.n_features == 162  # 4*40 + 2
     assert config_40.n_enriched_features == 211  # 5*40 + 11

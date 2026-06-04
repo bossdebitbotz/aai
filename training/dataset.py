@@ -51,6 +51,13 @@ class DataConfig:
     exchanges: list = None
     pairs: list = None
 
+    # Feature pipeline
+    feature_version: str = "v2"     # "v1" -> engineer_features; "v2" -> engineer_features_v2
+    savgol_window: int = 11         # V2 default (was hardcoded 21 in build_dataloaders)
+    # Data source
+    source: str = "db"              # "db" -> lob_5s; "parquet" -> parquet_dir
+    parquet_dir: str = "lob_data"
+
     def __post_init__(self):
         if self.exchanges is None:
             self.exchanges = [
@@ -75,8 +82,13 @@ class DataConfig:
 
     @property
     def n_enriched_features(self) -> int:
-        """Total features after engineer_features(): base (4N+2) + derived (N+9) = 5N+11."""
-        return self.lob_levels * 5 + 11
+        """base (4N+2) + derived. V1 derived=N+9 (=5N+11). V2 adds 8 momentum (=5N+19)."""
+        return self.lob_levels * 5 + (19 if self.feature_version == "v2" else 11)
+
+    @property
+    def warmup_trim(self) -> int:
+        """Rows to drop at the head of each split (largest feature lookback)."""
+        return max(self.savgol_window, 60)  # 60 = longest momentum horizon (log_return_60)
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +147,10 @@ async def _fetch_stream_data(
         features: np.ndarray of shape (T, n_features) — float64
         timestamps: np.ndarray of shape (T,) — float64 unix timestamps
     """
+    if getattr(config, "source", "db") == "parquet":
+        from training.data_source import fetch_parquet_stream
+        return fetch_parquet_stream(config.parquet_dir, exchange, symbol, config.lob_levels)
+
     feature_cols = _build_feature_columns(config.lob_levels)
     col_str = ", ".join(feature_cols)
 
@@ -145,6 +161,9 @@ async def _fetch_stream_data(
     # Filter out rows without full depth when training at >5 levels
     if config.lob_levels > 5:
         where_clauses.append(f"bid_price_{config.lob_levels} > 0")
+        where_clauses.append(f"ask_price_{config.lob_levels} > 0")
+        where_clauses.append("bid_price_1 > 0")
+        where_clauses.append("ask_price_1 > 0")
 
     if start_time:
         where_clauses.append(f"bucket >= ${idx}")
@@ -185,6 +204,13 @@ async def _fetch_stream_data(
         for j, col in enumerate(feature_cols):
             val = row[col]
             features[i, j] = val if val is not None else 0.0
+
+    finite_rows = np.isfinite(features).all(axis=1)
+    dropped = int((~finite_rows).sum())
+    if dropped:
+        logger.warning(f"  {exchange}/{symbol}: dropped {dropped} non-finite rows")
+        features = features[finite_rows]
+        timestamps = timestamps[finite_rows]
 
     return features, timestamps
 
@@ -400,6 +426,7 @@ def build_dataloaders(
     test_datasets = []
     scalers = {}
     stream_info = {}
+    test_by_stream = {}
 
     for exchange in config.exchanges:
         for symbol in config.pairs:
@@ -416,60 +443,60 @@ def build_dataloaders(
                 )
                 continue
 
-            # Feature engineering (OFI, volume, price features + SG smoothing)
-            features, derived_names = engineer_features(
-                features, n_levels=config.lob_levels,
-                apply_smoothing=True, savgol_window=21, savgol_poly=3,
-            )
-            logger.info(f"  {key}: enriched {features.shape[1]} features ({len(derived_names)} derived)")
+            # --- Split FIRST (raw), then engineer features per split (leak-free) ---
+            from training.features_v2 import engineer_features_v2
+            fe = engineer_features_v2 if config.feature_version == "v2" else engineer_features
 
-            # Chronological split
             n = len(features)
             train_end = int(n * config.train_ratio)
             val_end = int(n * (config.train_ratio + config.val_ratio))
 
-            train_feat = features[:train_end]
-            val_feat = features[train_end:val_end]
-            test_feat = features[val_end:]
+            trim = config.warmup_trim
 
-            train_ts = timestamps[:train_end]
-            val_ts = timestamps[train_end:val_end]
-            test_ts = timestamps[val_end:]
+            def _fe_split(raw_slice, ts_slice):
+                if len(raw_slice) <= trim:
+                    return np.empty((0, config.n_enriched_features)), np.empty((0,))
+                enr, _ = fe(raw_slice, n_levels=config.lob_levels,
+                            apply_smoothing=True, savgol_window=config.savgol_window)
+                return enr[trim:], ts_slice[trim:]
 
-            # Fit scaler on training data only
+            train_feat, train_ts = _fe_split(features[:train_end], timestamps[:train_end])
+            val_feat, val_ts     = _fe_split(features[train_end:val_end], timestamps[train_end:val_end])
+            test_feat, test_ts   = _fe_split(features[val_end:], timestamps[val_end:])
+
+            logger.info(f"  {key}: enriched to {train_feat.shape[1] if len(train_feat) else 0} features")
+
+            # --- Fit scaler on TRAIN only; winsorize using train percentile bounds ---
             scaler = LOBScaler(n_levels=config.lob_levels)
-            train_scaled = scaler.fit_transform(train_feat)
-            val_scaled = scaler.transform(val_feat)
-            test_scaled = scaler.transform(test_feat)
+            if len(train_feat) < config.window_size:
+                logger.warning(f"  {key}: train split too small after trim, skipping.")
+                continue
+            lo = np.percentile(train_feat, 0.1, axis=0)
+            hi = np.percentile(train_feat, 99.9, axis=0)
+            train_feat = np.clip(train_feat, lo, hi)
+            val_feat = np.clip(val_feat, lo, hi) if len(val_feat) else val_feat
+            test_feat = np.clip(test_feat, lo, hi) if len(test_feat) else test_feat
 
+            train_scaled = scaler.fit_transform(train_feat)
+            val_scaled = scaler.transform(val_feat) if len(val_feat) else val_feat
+            test_scaled = scaler.transform(test_feat) if len(test_feat) else test_feat
             scalers[key] = scaler
 
-            # Create datasets
+            train_ds = None
             if len(train_scaled) >= config.window_size:
-                train_datasets.append(
-                    LOBDataset(train_scaled, train_ts, exchange, symbol, config)
-                )
+                train_ds = LOBDataset(train_scaled, train_ts, exchange, symbol, config)
+                train_datasets.append(train_ds)
             if len(val_scaled) >= config.window_size:
-                val_datasets.append(
-                    LOBDataset(val_scaled, val_ts, exchange, symbol, config)
-                )
+                val_datasets.append(LOBDataset(val_scaled, val_ts, exchange, symbol, config))
             if len(test_scaled) >= config.window_size:
-                test_datasets.append(
-                    LOBDataset(test_scaled, test_ts, exchange, symbol, config)
-                )
+                ds = LOBDataset(test_scaled, test_ts, exchange, symbol, config)
+                test_datasets.append(ds)
+                test_by_stream[key] = ds
 
             stream_info[key] = {
-                "total_samples": n,
-                "train_samples": len(train_feat),
-                "val_samples": len(val_feat),
-                "test_samples": len(test_feat),
-                "train_windows": len(train_datasets[-1]) if train_datasets and train_datasets[-1].exchange == exchange and train_datasets[-1].symbol == symbol else 0,
+                "total_samples": int(n),
+                "train_windows": len(train_ds) if train_ds is not None else 0,
             }
-
-            logger.info(
-                f"  {key}: {n} total, train={len(train_feat)}, "
-                f"val={len(val_feat)}, test={len(test_feat)}"
-            )
 
     loop.close()
 
@@ -506,6 +533,7 @@ def build_dataloaders(
         "n_train_windows": sum(len(ds) for ds in train_datasets),
         "n_val_windows": sum(len(ds) for ds in val_datasets),
         "n_test_windows": sum(len(ds) for ds in test_datasets),
+        "test_datasets_by_stream": test_by_stream,
     }
 
     return train_loader, val_loader, test_loader, metadata
