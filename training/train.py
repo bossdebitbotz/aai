@@ -39,6 +39,23 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
+def build_data_config(args) -> DataConfig:
+    """V1 DataConfig from CLI args. Defaults preserve historic V1 behavior
+    (db source, savgol 21); the Colab baseline run passes --source parquet
+    --savgol-window 11 to match the V2 pipeline's data treatment."""
+    exchanges = args.exchanges.split(",") if args.exchanges else None
+    pairs = args.pairs.split(",") if args.pairs else None
+    return DataConfig(
+        lob_levels=args.levels,
+        exchanges=exchanges or DataConfig().exchanges,
+        pairs=pairs or DataConfig().pairs,
+        feature_version="v1",
+        savgol_window=args.savgol_window,
+        source=args.source,
+        parquet_dir=args.parquet_dir,
+    )
+
+
 def train_one_epoch(
     model, loss_fn, optimizer, scheduler, train_loader, device
 ) -> tuple[float, float, float]:
@@ -125,6 +142,12 @@ def main():
                         help="Comma-separated pairs (default: all)")
     parser.add_argument("--dry", action="store_true", help="Quick dry run (small config)")
     parser.add_argument("--run-name", type=str, default=None, help="Experiment run name")
+    parser.add_argument("--source", type=str, default="db", choices=["db", "parquet"],
+                        help="Data source: live DB or exported parquet (Colab)")
+    parser.add_argument("--parquet-dir", type=str, default="lob_data",
+                        help="Directory of exported parquet files (--source parquet)")
+    parser.add_argument("--savgol-window", type=int, default=21,
+                        help="Savitzky-Golay window (21 = historic V1; 11 matches V2 pipeline)")
     args = parser.parse_args()
 
     device = get_device()
@@ -136,10 +159,6 @@ def main():
         args.exchanges = args.exchanges or "binance_spot"
         args.pairs = args.pairs or "BTC-USDT"
         logger.info("DRY RUN mode: limited config")
-
-    # Parse exchanges and pairs
-    exchanges = args.exchanges.split(",") if args.exchanges else None
-    pairs = args.pairs.split(",") if args.pairs else None
 
     n_features = args.levels * 5 + 11  # enriched features after engineer_features()
     d_ff = args.d_model * 4
@@ -167,13 +186,7 @@ def main():
     )
 
     # Data config
-    data_config = DataConfig(
-        lob_levels=args.levels,
-        exchanges=exchanges or DataConfig().exchanges,
-        pairs=pairs or DataConfig().pairs,
-        feature_version="v1",
-        savgol_window=21,
-    )
+    data_config = build_data_config(args)
 
     # --- Step 1: Build DataLoaders ---
     logger.info("Building DataLoaders...")
