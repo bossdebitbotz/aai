@@ -28,3 +28,34 @@ def test_parquet_time_bounds(tmp_path):
     assert len(feats_b) == 30
     assert ts_b[0] == start.timestamp()
     assert ts_b[-1] == (end - dt.timedelta(seconds=5)).timestamp()
+
+
+from training import walkforward as WF
+
+
+def test_fold_ranges_rolling_no_leakage():
+    import datetime as dt
+    t0 = dt.datetime(2026, 3, 1, tzinfo=dt.timezone.utc)
+    t1 = t0 + dt.timedelta(days=88)
+    folds = WF.make_folds(t0, t1, train_days=45, test_days=8, tune_days=7)
+    assert len(folds) == 5
+    prev_test_start = None
+    for f in folds:
+        # tune ⊂ train, test strictly after train, no overlap
+        assert f.train_start < f.tune_start < f.train_end == f.test_start
+        assert f.tune_end == f.train_end
+        assert f.test_end > f.test_start
+        assert (f.train_end - f.train_start) == dt.timedelta(days=45)   # constant width
+        # test windows step forward and never overlap training
+        assert f.test_start >= f.train_end
+        if prev_test_start is not None:
+            assert f.test_start > prev_test_start
+        prev_test_start = f.test_start
+
+
+def test_fold_ranges_assert_disjoint():
+    import datetime as dt
+    t0 = dt.datetime(2026, 3, 1, tzinfo=dt.timezone.utc)
+    # too-short span yields zero folds rather than overlapping ones
+    folds = WF.make_folds(t0, t0 + dt.timedelta(days=40), train_days=45, test_days=8, tune_days=7)
+    assert folds == []
