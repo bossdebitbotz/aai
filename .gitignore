@@ -12,3 +12,14 @@ wallet/
 experiments/
 *.pt
 *.pth
+*.tar.gz
+executor/.env
+
+# Runtime artifacts (paper trader) + large data / archives — never commit
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.zip
+lob_data/
+lob_training_data/
