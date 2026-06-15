@@ -115,7 +115,7 @@ class Inventory:
             self.position = tgt
         return delta, cost
 
-    def flatten(self, mid: float, spread: float, fee_bp: float):
+    def flatten(self, mid: float, spread: float, fee_bp: float) -> tuple[float, float]:
         """Mark the held position to `mid`, then close it entirely via taker.
 
         Used by the trailing-stop overlay (risk.py). Additive: the FROZEN live
