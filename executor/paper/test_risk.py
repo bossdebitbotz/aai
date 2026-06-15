@@ -41,3 +41,60 @@ def test_inventory_flatten_short():
     assert abs(inv.marked_pnl_bp - 200.0) < 1e-6
     expected_cost = 2 * ((0.02 / 2) / 99 * 1e4 + 3.0)
     assert abs(cost - expected_cost) < 1e-6
+
+import numpy as np
+from executor.paper import risk as R
+
+
+def test_sigma_returns_needs_history():
+    assert R.sigma_returns(np.array([100.0, 101.0]), L=12) == 0.0   # too short -> 0
+    mids = 100.0 * np.cumprod(1 + np.full(20, 0.0))                 # flat -> zero vol
+    assert R.sigma_returns(mids, L=12) == 0.0
+
+
+def test_hwm_ratchets_favorable_only_long():
+    st = R.TrailingStop(k=2.0, L=12)
+    st.update(position=1.0, mid=100.0)     # opens long -> hwm=100
+    assert st.side == 1 and st.hwm == 100.0
+    st.update(position=1.0, mid=102.0)     # rises -> hwm=102
+    assert st.hwm == 102.0
+    st.update(position=1.0, mid=101.0)     # dips -> hwm stays 102 (ratchet up only)
+    assert st.hwm == 102.0
+
+
+def test_hwm_ratchets_favorable_only_short():
+    st = R.TrailingStop(k=2.0, L=12)
+    st.update(position=-1.0, mid=100.0)
+    assert st.side == -1 and st.hwm == 100.0
+    st.update(position=-1.0, mid=98.0)     # favorable for short -> hwm=98
+    assert st.hwm == 98.0
+    st.update(position=-1.0, mid=99.0)     # adverse -> hwm stays 98
+    assert st.hwm == 98.0
+
+
+def test_flat_resets():
+    st = R.TrailingStop()
+    st.update(1.0, 100.0)
+    st.update(0.0, 100.0)
+    assert st.side == 0 and st.hwm is None
+
+
+def test_breach_long_fires_below_trailed_level():
+    # build a noisy-but-trending mid series so sigma > 0
+    rng = np.linspace(100.0, 110.0, 30) + np.sin(np.arange(30))
+    st = R.TrailingStop(k=2.0, L=12, d_min=0.0005)
+    st.update(1.0, rng[-1])                # long, hwm = last (a peak)
+    sig = R.sigma_returns(rng, 12)
+    assert sig > 0
+    lvl = st.stop_level(rng)
+    assert lvl is not None and lvl < st.hwm           # stop sits below the peak for a long
+    assert st.breached(lvl - 1e-9, rng) is True       # just below the level -> breach
+    assert st.breached(st.hwm, rng) is False          # at the peak -> no breach
+
+
+def test_stop_not_armed_without_vol():
+    st = R.TrailingStop()
+    st.update(1.0, 100.0)
+    flat = np.full(20, 100.0)
+    assert st.stop_level(flat) is None                # zero vol -> unarmed
+    assert st.breached(50.0, flat) is False
