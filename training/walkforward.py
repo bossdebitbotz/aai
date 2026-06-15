@@ -130,3 +130,25 @@ def save_signals(path: str, signs, mids, spreads, vol, ts):
 def load_signals(path: str) -> dict:
     d = np.load(path)
     return {k: d[k] for k in ("signs", "mids", "spreads", "vol", "ts")}
+
+
+def aggregate(fold_results: list[dict]) -> dict:
+    """Stitch per-fold OOS net series into one continuous curve + per-fold table."""
+    per_fold = []
+    stitched = []
+    offset = 0.0
+    n_profitable = 0
+    for fr in fold_results:
+        ns = np.asarray(fr["net_series"], dtype=np.float64)
+        fold_net = float(ns[-1]) if len(ns) else 0.0
+        if fold_net > 0:
+            n_profitable += 1
+        m = metrics(ns, fr["n_trades"])
+        per_fold.append({"fold": fr["fold"], "best": fr["best"], **m})
+        stitched.extend((ns + offset).tolist())
+        offset += fold_net
+    stitched = np.asarray(stitched, dtype=np.float64)
+    overall = metrics(stitched, sum(fr["n_trades"] for fr in fold_results))
+    overall["n_folds"] = len(fold_results)
+    overall["n_profitable_folds"] = n_profitable
+    return {"overall": overall, "per_fold": per_fold}

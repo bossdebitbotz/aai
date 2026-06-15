@@ -116,3 +116,18 @@ def test_signal_cache_roundtrip(tmp_path):
     got = WF.load_signals(str(p))
     for kk in sig:
         assert np.array_equal(got[kk], sig[kk])
+
+
+def test_aggregate_stitches_oos_curve():
+    # two folds' OOS net series (each starts at its own 0); stitched curve is cumulative
+    f0 = dict(fold=0, net_series=np.array([0.0, 5.0, 8.0]), n_trades=2,
+              best=dict(k=2.0, L=12, cooldown_n=2))
+    f1 = dict(fold=1, net_series=np.array([0.0, -3.0, 4.0]), n_trades=1,
+              best=dict(k=1.5, L=12, cooldown_n=0))
+    rep = WF.aggregate([f0, f1])
+    # stitched final = 8 + 4 = 12
+    assert abs(rep["overall"]["net_bp"] - 12.0) < 1e-9
+    assert rep["overall"]["n_folds"] == 2
+    assert rep["overall"]["n_profitable_folds"] == 2     # +8 and +4
+    assert len(rep["per_fold"]) == 2
+    assert rep["per_fold"][0]["net_bp"] == 8.0
