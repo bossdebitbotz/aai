@@ -98,3 +98,66 @@ def test_stop_not_armed_without_vol():
     flat = np.full(20, 100.0)
     assert st.stop_level(flat) is None                # zero vol -> unarmed
     assert st.breached(50.0, flat) is False
+
+
+from executor.paper.strategy import Inventory
+
+
+def _ctx_highvol():
+    # scaled-mid context whose first-diff std clears VOL_THRESHOLD (0.002249).
+    # alternating +/-0.01 increments -> first-diffs std ~0.01 (a CONSTANT cumsum
+    # would give zero-variance diffs and wrongly fail the vol gate).
+    return np.cumsum(np.tile([0.01, -0.01], 60))
+
+
+def test_step_adds_while_above_stop_then_stops_out_flattens():
+    inv, st = Inventory(cap=3), R.TrailingStop(k=2.0, L=12, cooldown_n=2)
+    ctx = _ctx_highvol()
+    # strictly-rising but vol-bearing mids: all-positive *varying* increments -> price
+    # rises monotonically (hwm==current each step, so NO intermediate stop) yet sigma>0
+    # so the stop is armed for the later crash.
+    incs = 0.001 + 0.0005 * np.sin(np.arange(80))
+    mids = list(100.0 * np.cumprod(1 + incs))
+    for j, m in enumerate(mids):
+        R.step_with_stop(1, 1, 1, ctx, np.array(mids[:j + 1]), m, 0.02, 3.0, inv, st)
+    assert inv.position == 3.0            # accumulated to cap while above stop
+    pos_before = inv.position
+    # sharp drop below the trailed level on the next decision -> flatten-all
+    crash = mids + [mids[-1] * 0.95]
+    out = R.step_with_stop(1, 1, 1, ctx, np.array(crash), crash[-1], 0.02, 3.0, inv, st)
+    assert out["action"] == "stop"
+    assert inv.position == 0.0            # whole stack flattened
+    assert pos_before == 3.0
+
+
+def test_step_cooldown_blocks_reentry_then_releases():
+    inv, st = Inventory(cap=3), R.TrailingStop(k=2.0, L=12, cooldown_n=2)
+    ctx = _ctx_highvol()
+    # 80 steps so the ER gate (needs >60 decisions of history) engages and a long is built
+    incs = 0.001 + 0.0005 * np.sin(np.arange(80))
+    mids = list(100.0 * np.cumprod(1 + incs))
+    for j, m in enumerate(mids):
+        R.step_with_stop(1, 1, 1, ctx, np.array(mids[:j + 1]), m, 0.02, 3.0, inv, st)
+    crash = mids + [mids[-1] * 0.95]
+    R.step_with_stop(1, 1, 1, ctx, np.array(crash), crash[-1], 0.02, 3.0, inv, st)  # stop fires
+    assert st.in_cooldown
+    # next decision: even a perfect gated long must NOT re-open (cooldown)
+    series = crash + [crash[-1]]
+    out = R.step_with_stop(1, 1, 1, ctx, np.array(series), series[-1], 0.02, 3.0, inv, st)
+    assert out["action"] == "cooldown" and inv.position == 0.0
+
+
+def test_step_stop_overrides_trend_veto():
+    # In a strong uptrend the trend-veto blocks SHORTS, but a long that breaks its
+    # trailing stop must still flatten. Build long, then dip below stop.
+    inv, st = Inventory(cap=3), R.TrailingStop(k=1.0, L=12, cooldown_n=0)
+    ctx = _ctx_highvol()
+    # 80 steps so the ER gate (needs >60 decisions of history) engages and a long is built
+    incs = 0.001 + 0.0005 * np.sin(np.arange(80))
+    mids = list(100.0 * np.cumprod(1 + incs))
+    for j, m in enumerate(mids):
+        R.step_with_stop(1, 1, 1, ctx, np.array(mids[:j + 1]), m, 0.02, 3.0, inv, st)
+    assert inv.position > 0
+    drop = mids + [mids[-1] * 0.97]
+    out = R.step_with_stop(1, 1, 1, ctx, np.array(drop), drop[-1], 0.02, 3.0, inv, st)
+    assert out["action"] == "stop" and inv.position == 0.0

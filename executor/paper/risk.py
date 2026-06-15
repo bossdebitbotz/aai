@@ -12,6 +12,8 @@ See docs/superpowers/specs/2026-06-15-trailing-stop-walkforward-design.md.
 from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
+from executor.paper import strategy as S
+from executor.paper.strategy import Inventory
 
 # Defaults — SWEPT by the walk-forward inner loop, not hand-tuned.
 STOP_K        = 2.0       # stop distance in sigma units
@@ -85,3 +87,44 @@ class TrailingStop:
     @property
     def in_cooldown(self) -> bool:
         return self._cooldown > 0
+
+
+def step_with_stop(s0: int, s1: int, s2: int,
+                   scaled_mid_ctx: np.ndarray,
+                   mid_decisions: np.ndarray,
+                   mid: float, spread: float, fee_bp: float,
+                   inv: Inventory, stop: TrailingStop) -> dict:
+    """One decision with the trailing-stop overlay. Mutates `inv` and `stop`.
+
+    Order per decision:
+      1. tick cooldown
+      2. if the trailing stop is breached -> flatten-all (overrides gates/veto)
+      3. elif in re-entry cooldown -> mark + hold (no new entries)
+      4. else -> normal FROZEN gate decision + inventory accumulate
+      5. ratchet/arm the stop's high-water mark with the post-trade position
+    Returns {"action", "signal", "position", "net_bp"}.
+    """
+    stop.tick_cooldown()
+
+    if stop.breached(mid, mid_decisions):
+        inv.flatten(mid, spread, fee_bp)
+        stop.start_cooldown()
+        stop.reset()
+        action, signal = "stop", 0
+    elif stop.in_cooldown:
+        inv.on_decision(0, gated=False, mid=mid, spread=spread, fee_bp=fee_bp)  # mark + hold
+        action, signal = "cooldown", 0
+    else:
+        base = S.base_signal(s0, s1, s2)
+        signal = 0
+        if (base != 0
+                and S.context_vol(scaled_mid_ctx) >= S.VOL_THRESHOLD
+                and not S.trend_veto(base, mid_decisions)
+                and S.efficiency_ratio(mid_decisions) >= S.ER_MIN):
+            signal = base
+        inv.on_decision(signal, gated=signal != 0, mid=mid, spread=spread, fee_bp=fee_bp)
+        action = "trade" if signal != 0 else "flat"
+
+    stop.update(inv.position, mid)   # arm/ratchet hwm AFTER the trade
+    return {"action": action, "signal": signal,
+            "position": inv.position, "net_bp": inv.net_pnl_bp}
