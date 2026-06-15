@@ -10,7 +10,7 @@ exit that overrides the trend-veto.
 See docs/superpowers/specs/2026-06-15-trailing-stop-walkforward-design.md.
 """
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 from executor.paper import strategy as S
 from executor.paper.strategy import Inventory
@@ -41,7 +41,7 @@ class TrailingStop:
     d_min: float = STOP_DMIN
     side: int = 0                  # +1 long / -1 short / 0 flat
     hwm: float | None = None       # favorable extreme of mid since position opened
-    _cooldown: int = 0
+    _cooldown: int = field(default=0, init=False)   # internal state, not a constructor arg
 
     def reset(self) -> None:
         self.side = 0

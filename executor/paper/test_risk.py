@@ -100,9 +100,6 @@ def test_stop_not_armed_without_vol():
     assert st.breached(50.0, flat) is False
 
 
-from executor.paper.strategy import Inventory
-
-
 def _ctx_highvol():
     # scaled-mid context whose first-diff std clears VOL_THRESHOLD (0.002249).
     # alternating +/-0.01 increments -> first-diffs std ~0.01 (a CONSTANT cumsum
