@@ -227,3 +227,62 @@ def train_fold(fold: "Fold", out_dir: str, parquet_dir: str = "lob_data",
          "prediction_length": cfg.prediction_length, "d_model": d_model, "n_heads": n_heads,
          "n_layers": n_layers, "d_ff": d_ff, "dropout": 0.1}))
     return {"best_val_dir_acc": best_val, "run_dir": str(out)}
+
+
+import json
+
+N_LEVELS_DEFAULT, MID_IDX, SPR_IDX, CTX, STRIDE, WARMUP = 40, 160, 161, 120, 23, 60
+
+
+def precompute_signals(run_dir: str, stream: str, start, end, parquet_dir: str = "lob_data",
+                       levels: int = N_LEVELS_DEFAULT, batch: int = 256) -> dict:
+    """Run the fold model over [start, end) for one stream and return per-decision
+    arrays {signs (M,3), mids (M,), spreads (M,), vol (M,), ts (M,)}.
+
+    Features use centered savgol (training-faithful; the live harness reproduces
+    this causally via DECISION_LAG). Winsorize is skipped (z-score exact), matching
+    the live path — we backtest what we trade.
+    """
+    import torch
+    from training.features_v2 import engineer_features_v2
+    from training.model_v2 import CompoundAttentionModelV2
+    from training.data_source import fetch_parquet_stream
+    from training.dataset import EXCHANGE_MAP, SYMBOL_MAP
+    from executor.paper import strategy as S
+
+    cfg = json.load(open(f"{run_dir}/config.json"))
+    ck = torch.load(f"{run_dir}/checkpoints/best.pt", map_location="cpu", weights_only=False)
+    pl = ck.get("prediction_length", cfg["prediction_length"])
+    model = CompoundAttentionModelV2(n_levels=levels, n_features=cfg["n_features"],
+        context_length=cfg["context_length"], prediction_length=pl, d_model=cfg["d_model"],
+        n_heads=cfg["n_heads"], n_layers=cfg["n_layers"], d_ff=cfg["d_ff"], dropout=cfg.get("dropout", 0.1))
+    model.load_state_dict(ck["model_state_dict"]); model.eval()
+
+    import pickle
+    sc = pickle.load(open(f"{run_dir}/scalers.pkl", "rb"))[stream]
+    # stream = "<exchange>_<symbol>", e.g. "binance_perp_BTC-USDT" -> exch="binance_perp", sym="BTC-USDT"
+    parts = stream.split("_")
+    exch, sym = "_".join(parts[:2]), parts[-1]
+    ex_id, sy_id = EXCHANGE_MAP[exch], SYMBOL_MAP[sym]
+    raw, _ = fetch_parquet_stream(parquet_dir, exch, sym, levels, start_time=start, end_time=end)
+    feats, _ = engineer_features_v2(raw, levels, apply_smoothing=True, savgol_window=11)
+    scaled = (feats - sc._means) / sc._stds
+    T = len(scaled)
+    didx = np.arange(CTX + WARMUP, T, STRIDE)
+
+    signs = np.zeros((len(didx), 3), np.int8)
+    with torch.no_grad():
+        for b in range(0, len(didx), batch):
+            idx = didx[b:b + batch]
+            ctx = np.stack([scaled[t - CTX:t] for t in idx])
+            out = model(torch.from_numpy(ctx).float(),
+                        torch.full((len(idx),), ex_id, dtype=torch.long),
+                        torch.full((len(idx),), sy_id, dtype=torch.long))
+            dl = (out[1] if isinstance(out, (tuple, list)) else out).reshape(-1, 3, 3).numpy()
+            pred = dl.argmax(2)
+            signs[b:b + len(idx)] = np.where(pred == 2, 1, np.where(pred == 0, -1, 0))
+    mids = raw[didx, MID_IDX].astype(np.float64)
+    spreads = np.abs(raw[didx, SPR_IDX]).astype(np.float64)
+    vol = np.array([S.context_vol(scaled[t - CTX:t, MID_IDX]) for t in didx], dtype=np.float64)
+    ts = didx.astype(np.float64)
+    return dict(signs=signs, mids=mids, spreads=spreads, vol=vol, ts=ts)
