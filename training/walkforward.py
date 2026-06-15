@@ -286,3 +286,73 @@ def precompute_signals(run_dir: str, stream: str, start, end, parquet_dir: str =
     vol = np.array([S.context_vol(scaled[t - CTX:t, MID_IDX]) for t in didx], dtype=np.float64)
     ts = didx.astype(np.float64)
     return dict(signs=signs, mids=mids, spreads=spreads, vol=vol, ts=ts)
+
+
+STREAMS = ["binance_perp_BTC-USDT", "binance_perp_ETH-USDT",
+           "binance_perp_SOL-USDT", "binance_perp_WLD-USDT"]
+
+
+def run_walkforward(data_start, data_end, out_root: str, parquet_dir: str = "lob_data",
+                    train_days: int = 45, test_days: int = 8, tune_days: int = 7,
+                    streams=STREAMS, epochs: int = 50, calibrate: bool = False) -> dict:
+    """Full nested walk-forward. If calibrate=True, runs ONLY fold 0 and reports
+    per-fold train time + best_val_dir_acc (compare to the full-history model
+    before committing to all folds — spec section 5.1 override check)."""
+    import time, json
+    from pathlib import Path
+    folds = make_folds(data_start, data_end, train_days, test_days, tune_days)
+    if calibrate:
+        folds = folds[:1]
+    Path(out_root).mkdir(parents=True, exist_ok=True)
+    grid = param_grid()
+    fold_results = []
+    timings = []
+    for fi, fold in enumerate(folds):
+        fdir = f"{out_root}/fold{fi}"
+        t0 = time.time()
+        train_info = train_fold(fold, fdir, parquet_dir=parquet_dir, epochs=epochs)
+        timings.append({"fold": fi, "train_secs": time.time() - t0, **train_info})
+        # per stream: cache tune + test signals, sweep on tune, evaluate on test
+        per_stream_test_nets = []
+        chosen = {}
+        for stream in streams:
+            tune = precompute_signals(fdir, stream, fold.tune_start, fold.tune_end, parquet_dir)
+            test = precompute_signals(fdir, stream, fold.test_start, fold.test_end, parquet_dir)
+            save_signals(f"{fdir}/{stream}_tune.npz", **tune)
+            save_signals(f"{fdir}/{stream}_test.npz", **test)
+            best, table = sweep(tune["signs"], tune["mids"], tune["spreads"], tune["vol"], grid)
+            chosen[stream] = best
+            net, n_tr = simulate(test["signs"], test["mids"], test["spreads"], test["vol"], best)
+            per_stream_test_nets.append((net, n_tr))
+        # portfolio OOS for the fold = sum of per-stream net series (equal weight)
+        maxlen = max(len(n) for n, _ in per_stream_test_nets)
+        port = np.zeros(maxlen)
+        total_trades = 0
+        for net, n_tr in per_stream_test_nets:
+            padded = np.concatenate([net, np.full(maxlen - len(net), net[-1] if len(net) else 0.0)])
+            port += padded
+            total_trades += n_tr
+        fold_results.append({"fold": fi, "net_series": port, "n_trades": total_trades,
+                             "best": chosen})
+    report = aggregate(fold_results)
+    report["timings"] = timings
+    report["calibrate"] = calibrate
+    Path(f"{out_root}/report.json").write_text(json.dumps(report, indent=2, default=list))
+    return report
+
+
+if __name__ == "__main__":
+    import argparse, datetime as dt
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data-start", required=True)   # ISO date, e.g. 2026-03-14
+    ap.add_argument("--data-end", required=True)
+    ap.add_argument("--out", default="experiments/walkforward/run")
+    ap.add_argument("--parquet-dir", default="lob_data")
+    ap.add_argument("--epochs", type=int, default=50)
+    ap.add_argument("--calibrate", action="store_true")
+    a = ap.parse_args()
+    ds = dt.datetime.fromisoformat(a.data_start).replace(tzinfo=dt.timezone.utc)
+    de = dt.datetime.fromisoformat(a.data_end).replace(tzinfo=dt.timezone.utc)
+    rep = run_walkforward(ds, de, a.out, a.parquet_dir, epochs=a.epochs, calibrate=a.calibrate)
+    print(json.dumps(rep["overall"], indent=2))
+    print("timings:", rep["timings"])
