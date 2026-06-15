@@ -88,3 +88,19 @@ def test_simulate_flat_when_no_signal():
     net_series, n_trades = WF.simulate(signs, mids, spreads, vol, dict(k=2.0, L=12, cooldown_n=2))
     assert n_trades == 0
     assert abs(net_series[-1]) < 1e-9
+
+
+def test_sweep_picks_best_on_tune_slice():
+    rng = np.random.default_rng(1)
+    N = 400
+    mids = 100.0 * np.cumprod(1 + rng.normal(0.0009, 0.0010, N))
+    spreads = np.full(N, 0.02)
+    vol = np.full(N, 0.01)
+    signs = np.tile(np.array([1, 1, 1], dtype=np.int8), (N, 1))
+    grid = WF.param_grid(ks=[1.0, 2.0, 3.0], Ls=[12], cooldowns=[0, 2])
+    assert len(grid) == 6
+    best, table = WF.sweep(signs, mids, spreads, vol, grid, fee_bp=3.0)
+    assert set(best) >= {"k", "L", "cooldown_n"}
+    # best must be the argmax by (net_bp, sharpe) over the table
+    top = max(table, key=lambda r: (r["net_bp"], r["sharpe"]))
+    assert (best["k"], best["L"], best["cooldown_n"]) == (top["k"], top["L"], top["cooldown_n"])

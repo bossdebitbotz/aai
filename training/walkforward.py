@@ -101,3 +101,23 @@ def metrics(net_series: np.ndarray, n_trades: int) -> dict:
     return {"net_bp": float(net_series[-1]) if len(net_series) else 0.0,
             "sharpe": sharpe, "max_dd_bp": max_dd,
             "n_trades": int(n_trades), "n_decisions": int(len(net_series))}
+
+
+import itertools
+
+
+def param_grid(ks=(1.0, 1.5, 2.0, 2.5, 3.0), Ls=(12, 24), cooldowns=(0, 2, 5)) -> list[dict]:
+    return [dict(k=k, L=L, cooldown_n=c) for k, L, c in itertools.product(ks, Ls, cooldowns)]
+
+
+def sweep(signs, mids, spreads, vol, grid: list[dict], fee_bp: float = FEE_BP):
+    """Evaluate every param set on the (tune) slice. Returns (best_params, table).
+    Objective: net_bp primary, sharpe tie-break (favours flat/robust regions)."""
+    table = []
+    for p in grid:
+        net, n_trades = simulate(signs, mids, spreads, vol, p, fee_bp)
+        m = metrics(net, n_trades)
+        table.append({**p, **m})
+    best_row = max(table, key=lambda r: (r["net_bp"], r["sharpe"]))
+    best = {"k": best_row["k"], "L": best_row["L"], "cooldown_n": best_row["cooldown_n"]}
+    return best, table
