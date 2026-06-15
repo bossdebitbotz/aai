@@ -48,3 +48,56 @@ def make_folds(data_start: dt.datetime, data_end: dt.datetime,
         folds.append(f)
         t = t + test_w
     return folds
+
+
+import numpy as np
+import sys
+sys.path.insert(0, "/Volumes/Docker-SSD/projects/aaiwdbback/aai")
+from executor.paper.strategy import Inventory
+from executor.paper import risk as R
+
+FEE_BP = 3.0
+
+
+def _ctx_for_vol(v: float) -> np.ndarray:
+    """A context whose context_vol (std of first-diffs) == v.
+    diffs = [-v, +v] -> std = v ; values = [0, -v, 0]."""
+    return np.array([0.0, -v, 0.0])
+
+
+def simulate(signs: np.ndarray, mids: np.ndarray, spreads: np.ndarray,
+             vol: np.ndarray, params: dict, fee_bp: float = FEE_BP):
+    """Run the inventory + trailing-stop strategy over one slice of cached
+    per-decision signals. `vol` is the precomputed context_vol per decision
+    (scaled-mid first-diff std). Returns (net_bp_series (N,), n_trades).
+
+    The vol gate needs a scaled-mid CONTEXT, but we only cached the scalar
+    context_vol per decision; `_ctx_for_vol` rebuilds a 3-point context whose
+    context_vol equals vol[i] exactly."""
+    inv = Inventory()
+    stop = R.TrailingStop(k=params["k"], L=params["L"], cooldown_n=params["cooldown_n"])
+    N = len(mids)
+    net = np.zeros(N, dtype=np.float64)
+    n_trades = 0
+    for i in range(N):
+        ctx = _ctx_for_vol(float(vol[i]))
+        prev_pos = inv.position
+        out = R.step_with_stop(int(signs[i, 0]), int(signs[i, 1]), int(signs[i, 2]),
+                               ctx, mids[: i + 1], float(mids[i]), float(spreads[i]),
+                               fee_bp, inv, stop)
+        if inv.position != prev_pos:
+            n_trades += 1
+        net[i] = out["net_bp"]
+    return net, n_trades
+
+
+def metrics(net_series: np.ndarray, n_trades: int) -> dict:
+    """Per-decision PnL increments -> Sharpe + max drawdown (bp)."""
+    net_series = np.asarray(net_series, dtype=np.float64)
+    rets = np.diff(net_series, prepend=0.0)
+    sharpe = float(rets.mean() / rets.std()) if rets.std() > 1e-12 else 0.0
+    running_max = np.maximum.accumulate(net_series) if len(net_series) else np.array([0.0])
+    max_dd = float((running_max - net_series).max()) if len(net_series) else 0.0
+    return {"net_bp": float(net_series[-1]) if len(net_series) else 0.0,
+            "sharpe": sharpe, "max_dd_bp": max_dd,
+            "n_trades": int(n_trades), "n_decisions": int(len(net_series))}

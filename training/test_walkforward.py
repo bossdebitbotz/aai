@@ -59,3 +59,32 @@ def test_fold_ranges_assert_disjoint():
     # too-short span yields zero folds rather than overlapping ones
     folds = WF.make_folds(t0, t0 + dt.timedelta(days=40), train_days=45, test_days=8, tune_days=7)
     assert folds == []
+
+
+def test_simulate_runs_and_metrics_consistent():
+    rng = np.random.default_rng(0)
+    N = 300
+    # clear up-drift (drift ~ noise) so the ER gate admits trades after warmup
+    mids = 100.0 * np.cumprod(1 + rng.normal(0.0008, 0.0008, N))
+    spreads = np.full(N, 0.02)
+    vol = np.full(N, 0.01)                  # clears VOL_THRESHOLD
+    signs = np.tile(np.array([1, 1, 1], dtype=np.int8), (N, 1))   # always-up heads
+    params = dict(k=2.0, L=12, cooldown_n=2)
+    net_series, n_trades = WF.simulate(signs, mids, spreads, vol, params, fee_bp=3.0)
+    assert len(net_series) == N
+    assert n_trades >= 1
+    m = WF.metrics(net_series, n_trades)
+    assert set(m) >= {"net_bp", "sharpe", "max_dd_bp", "n_trades", "n_decisions"}
+    assert abs(m["net_bp"] - net_series[-1]) < 1e-9
+    assert m["n_decisions"] == N
+
+
+def test_simulate_flat_when_no_signal():
+    N = 200
+    mids = np.full(N, 100.0)
+    spreads = np.full(N, 0.02)
+    vol = np.zeros(N)                       # below VOL_THRESHOLD -> never trades
+    signs = np.tile(np.array([1, 1, 1], dtype=np.int8), (N, 1))
+    net_series, n_trades = WF.simulate(signs, mids, spreads, vol, dict(k=2.0, L=12, cooldown_n=2))
+    assert n_trades == 0
+    assert abs(net_series[-1]) < 1e-9
