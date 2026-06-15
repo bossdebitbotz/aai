@@ -149,7 +149,8 @@ async def _fetch_stream_data(
     """
     if getattr(config, "source", "db") == "parquet":
         from training.data_source import fetch_parquet_stream
-        return fetch_parquet_stream(config.parquet_dir, exchange, symbol, config.lob_levels)
+        return fetch_parquet_stream(config.parquet_dir, exchange, symbol, config.lob_levels,
+                                    start_time=start_time, end_time=end_time)
 
     feature_cols = _build_feature_columns(config.lob_levels)
     col_str = ", ".join(feature_cols)
