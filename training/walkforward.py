@@ -121,3 +121,12 @@ def sweep(signs, mids, spreads, vol, grid: list[dict], fee_bp: float = FEE_BP):
     best_row = max(table, key=lambda r: (r["net_bp"], r["sharpe"]))
     best = {"k": best_row["k"], "L": best_row["L"], "cooldown_n": best_row["cooldown_n"]}
     return best, table
+
+
+def save_signals(path: str, signs, mids, spreads, vol, ts):
+    np.savez(path, signs=signs, mids=mids, spreads=spreads, vol=vol, ts=ts)
+
+
+def load_signals(path: str) -> dict:
+    d = np.load(path)
+    return {k: d[k] for k in ("signs", "mids", "spreads", "vol", "ts")}

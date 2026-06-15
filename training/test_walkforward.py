@@ -104,3 +104,15 @@ def test_sweep_picks_best_on_tune_slice():
     # best must be the argmax by (net_bp, sharpe) over the table
     top = max(table, key=lambda r: (r["net_bp"], r["sharpe"]))
     assert (best["k"], best["L"], best["cooldown_n"]) == (top["k"], top["L"], top["cooldown_n"])
+
+
+def test_signal_cache_roundtrip(tmp_path):
+    N = 50
+    sig = dict(signs=np.tile([1, 0, -1], (N, 1)).astype(np.int8),
+               mids=np.linspace(100, 110, N), spreads=np.full(N, 0.02),
+               vol=np.full(N, 0.01), ts=np.arange(N, dtype=float))
+    p = tmp_path / "fold0_test.npz"
+    WF.save_signals(str(p), **sig)
+    got = WF.load_signals(str(p))
+    for kk in sig:
+        assert np.array_equal(got[kk], sig[kk])
