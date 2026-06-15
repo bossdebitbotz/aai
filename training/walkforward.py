@@ -152,3 +152,78 @@ def aggregate(fold_results: list[dict]) -> dict:
     overall["n_folds"] = len(fold_results)
     overall["n_profitable_folds"] = n_profitable
     return {"overall": overall, "per_fold": per_fold}
+
+
+import pickle
+from pathlib import Path
+import torch
+
+
+def train_fold(fold: "Fold", out_dir: str, parquet_dir: str = "lob_data",
+               levels: int = 40, epochs: int = 50, batch_size: int = 16,
+               accum_steps: int = 8, lr: float = 1e-3,
+               d_model: int = 66, n_heads: int = 3, n_layers: int = 3,
+               patience: int = 10, seed: int = 0) -> dict:
+    """Retrain the V2 model on fold.train_start..fold.train_end (parquet, bounded).
+    Saves best.pt + scalers.pkl into out_dir. Returns {best_val_dir_acc, run_dir}.
+
+    Reuses train_v2's per-epoch helpers so training logic stays single-sourced.
+    """
+    import datetime as dt
+    from training.dataset import DataConfig, build_dataloaders
+    from training.model_v2 import CompoundAttentionModelV2, LOBLossV2
+    from training.model import WarmupDecayScheduler
+    from training.train_v2 import run_one_epoch_v2, evaluate_v2_loader, get_device
+
+    torch.manual_seed(seed)
+    device = get_device()
+    n_features = levels * 5 + 19
+    d_ff = d_model * 4
+    out = Path(out_dir); (out / "checkpoints").mkdir(parents=True, exist_ok=True)
+
+    cfg = DataConfig(lob_levels=levels, feature_version="v2", savgol_window=11,
+                     source="parquet", parquet_dir=parquet_dir,
+                     train_ratio=0.85, val_ratio=0.15)   # within-window train/val (no internal test)
+    # Bound to the fold's TRAIN window only.
+    train_loader, val_loader, _, meta = build_dataloaders(
+        cfg, batch_size=batch_size, start_time=fold.train_start, end_time=fold.train_end)
+
+    model = CompoundAttentionModelV2(
+        n_levels=levels, n_features=n_features, context_length=cfg.context_length,
+        prediction_length=cfg.prediction_length, d_model=d_model, n_heads=n_heads,
+        n_layers=n_layers, d_ff=d_ff, dropout=0.1).to(device)
+    first_scaler = next(iter(meta["scalers"].values()))
+    loss_fn = LOBLossV2(n_levels=levels, use_feature_weights=True, mid_price_idx=levels * 4,
+                        scaler_means=first_scaler._means, scaler_stds=first_scaler._stds).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = WarmupDecayScheduler(optimizer, warmup_steps=1000, decay_factor=0.8, decay_every=5000)
+
+    with open(out / "scalers.pkl", "wb") as f:
+        pickle.dump(meta["scalers"], f)
+
+    best_val = -1.0
+    no_improve = 0
+    for epoch in range(1, epochs + 1):
+        run_one_epoch_v2(model, loss_fn, optimizer, scheduler, train_loader, device, accum_steps)
+        va = evaluate_v2_loader(model, loss_fn, val_loader, device)
+        score = va["dir_acc_mean"]
+        is_best = score > best_val
+        if is_best:
+            best_val = score
+            no_improve = 0
+            torch.save({"model_state_dict": model.state_dict(), "n_features": n_features,
+                        "context_length": cfg.context_length, "prediction_length": cfg.prediction_length,
+                        "direction_horizons": list(loss_fn.direction_horizons),
+                        "mid_price_idx": loss_fn.mid_price_idx, "feature_version": "v2",
+                        "d_model": d_model, "n_heads": n_heads, "n_layers": n_layers, "d_ff": d_ff},
+                       out / "checkpoints" / "best.pt")
+        else:
+            no_improve += 1
+            if no_improve >= patience:
+                break
+    # config.json for downstream loaders (mirrors experiments/<run>/config.json shape)
+    (out / "config.json").write_text(__import__("json").dumps(
+        {"n_features": n_features, "context_length": cfg.context_length,
+         "prediction_length": cfg.prediction_length, "d_model": d_model, "n_heads": n_heads,
+         "n_layers": n_layers, "d_ff": d_ff, "dropout": 0.1}))
+    return {"best_val_dir_acc": best_val, "run_dir": str(out)}
