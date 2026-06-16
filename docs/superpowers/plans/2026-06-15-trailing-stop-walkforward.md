@@ -346,7 +346,8 @@ def test_step_adds_while_above_stop_then_stops_out_flattens():
 def test_step_cooldown_blocks_reentry_then_releases():
     inv, st = Inventory(cap=3), R.TrailingStop(k=2.0, L=12, cooldown_n=2)
     ctx = _ctx_highvol()
-    incs = 0.001 + 0.0005 * np.sin(np.arange(40))
+    # 80 steps so the ER gate (needs >60 decisions of history) engages and a long is built
+    incs = 0.001 + 0.0005 * np.sin(np.arange(80))
     mids = list(100.0 * np.cumprod(1 + incs))
     for j, m in enumerate(mids):
         R.step_with_stop(1, 1, 1, ctx, np.array(mids[:j + 1]), m, 0.02, 3.0, inv, st)
@@ -364,7 +365,8 @@ def test_step_stop_overrides_trend_veto():
     # trailing stop must still flatten. Build long, then dip below stop.
     inv, st = Inventory(cap=3), R.TrailingStop(k=1.0, L=12, cooldown_n=0)
     ctx = _ctx_highvol()
-    incs = 0.001 + 0.0005 * np.sin(np.arange(40))
+    # 80 steps so the ER gate (needs >60 decisions of history) engages and a long is built
+    incs = 0.001 + 0.0005 * np.sin(np.arange(80))
     mids = list(100.0 * np.cumprod(1 + incs))
     for j, m in enumerate(mids):
         R.step_with_stop(1, 1, 1, ctx, np.array(mids[:j + 1]), m, 0.02, 3.0, inv, st)
@@ -528,7 +530,10 @@ def fetch_parquet_stream(parquet_dir, exchange, symbol, n_levels,
         df = df[mask]
     feature_cols = _build_feature_columns(n_levels)
     feats = df[feature_cols].to_numpy(dtype=np.float64)
-    ts = pd.to_datetime(df["bucket"], utc=True).astype("int64").to_numpy() / 1e9  # unix seconds
+    # NOTE: the exported parquet stores `bucket` as strings -> datetime64[us]; .astype(int64)
+    # yields MICROseconds, so divide by 1e6 (not 1e9) to get unix seconds. The previous /1e9
+    # silently produced 0.005s per 5s bucket, which disabled LOBDataset gap detection.
+    ts = pd.to_datetime(df["bucket"], utc=True).astype("int64").to_numpy() / 1e6  # unix seconds
     finite_rows = np.isfinite(feats).all(axis=1)
     feats = feats[finite_rows]
     ts = ts[finite_rows]
