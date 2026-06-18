@@ -1,0 +1,76 @@
+{
+  "trading_mode": "futures",
+  "margin_mode": "isolated",
+  "max_open_trades": 2,
+  "stake_currency": "USDT",
+  "stake_amount": "unlimited",
+  "tradable_balance_ratio": 0.5,
+  "dry_run": true,
+  "cancel_open_orders_on_exit": true,
+  "exchange": {
+    "name": "binance",
+    "key": "YOUR_BINANCE_API_KEY",
+    "secret": "YOUR_BINANCE_API_SECRET",
+    "pair_whitelist": [
+      "BTC/USDT:USDT",
+      "ETH/USDT:USDT"
+    ],
+    "pair_blacklist": []
+  },
+  "entry_pricing": {
+    "price_side": "same",
+    "use_order_book": true,
+    "order_book_top": 1
+  },
+  "exit_pricing": {
+    "price_side": "same",
+    "use_order_book": true,
+    "order_book_top": 1
+  },
+  "order_types": {
+    "entry": "limit",
+    "exit": "limit",
+    "stoploss": "market",
+    "stoploss_on_exchange": false
+  },
+  "order_time_in_force": {
+    "entry": "PO",
+    "exit": "PO"
+  },
+  "unfilledtimeout": {
+    "entry": 30,
+    "exit": 30,
+    "unit": "seconds"
+  },
+  "stoploss": -0.1,
+  "minimal_roi": {},
+  "api_server": {
+    "enabled": true,
+    "listen_ip_address": "127.0.0.1",
+    "listen_port": 8080,
+    "verbosity": "error",
+    "enable_openapi": false,
+    "jwt_secret_key": "aai_jwt_secret_change_me",
+    "CORS_origins": [],
+    "username": "aai",
+    "password": "CHANGE_ME"
+  },
+  "telegram": {
+    "enabled": false,
+    "token": "",
+    "chat_id": ""
+  },
+  "pairlists": [
+    {
+      "method": "StaticPairList"
+    }
+  ],
+  "bot_name": "AAI_LOB_Trader",
+  "force_entry_enable": true,
+  "initial_state": "running",
+  "internals": {
+    "process_throttle_secs": 5
+  },
+  "strategy": "AAIStrategy",
+  "strategy_path": "strategies/"
+}

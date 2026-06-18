@@ -23,3 +23,16 @@ executor/.env
 *.zip
 lob_data/
 lob_training_data/
+
+# Live secrets, runtime trade DBs, vendored deps, model binaries — NEVER commit
+# (gitignore has no inline comments — keep patterns on their own lines)
+# executor/config.json holds live Binance API keys
+executor/config.json
+# executor/freqtrade/ is the 105M vendored package (pip install -e)
+executor/freqtrade/
+# executor/checkpoints/ is 233M of model binaries (mirrored on Google Drive)
+executor/checkpoints/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+executor/training_curves_phase2.png

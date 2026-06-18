@@ -14,17 +14,17 @@ services:
     command:
       - postgres
       - -c
-      - shared_buffers=8GB
+      - shared_buffers=512MB
       - -c
-      - work_mem=256MB
+      - work_mem=32MB
       - -c
-      - maintenance_work_mem=1GB
+      - maintenance_work_mem=128MB
       - -c
-      - effective_cache_size=24GB
+      - effective_cache_size=1GB
       - -c
       - max_connections=100
       - -c
-      - max_wal_size=4GB
+      - max_wal_size=1GB
       - -c
       - checkpoint_completion_target=0.9
       - -c
@@ -38,7 +38,7 @@ services:
       - -c
       - commit_delay=1000
     restart: unless-stopped
-    shm_size: '4gb'
+    shm_size: '256mb'
     ulimits:
       memlock:
         soft: -1
@@ -47,7 +47,7 @@ services:
       resources:
         limits:
           memory: 16G
-          cpus: '4'
+          cpus: '3'
         reservations:
           memory: 8G
           cpus: '2'

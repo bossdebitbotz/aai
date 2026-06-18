@@ -52,9 +52,9 @@ BYBIT_SPOT_WS_URL = "wss://stream.bybit.com/v5/public/spot"
 DB_CONFIG = {
     'host': 'localhost',
     'port': 5432,
-    'user': 'backtest_user',
-    'password': 'backtest_password',
-    'database': 'backtest_db'
+    'user': 'lob_user',
+    'password': 'lob_password',
+    'database': 'lob_data'
 }
 
 # Global flag for controlling continuous execution
