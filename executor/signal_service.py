@@ -38,6 +38,7 @@ if _PROJECT_ROOT not in sys.path:
 
 from executor.paper import signal_generator as SG       # SSOT signal path (bit-exact to training)
 from executor.paper import db_source as DBS
+from executor.paper import sizing as Z                    # vol-target/signal-decay exit (decay_k=3, tuned)
 from executor.paper.harness import FEE_BP, STRIDE
 from executor.paper.ledger import PaperLedger
 
@@ -213,11 +214,18 @@ async def main() -> None:
                 last_bucket[stream] = now_b
                 if sig.get("reason"):
                     continue
+                # SSOT exit overlay (vol-target / signal-decay, decay_k=3) — mirrors harness._step_sizing
                 inv = ledger.load_inventory(stream)
+                tr = ledger.load_sizing_tracker(stream)
                 prev_pos, prev_cost = inv.position, inv.realized_cost_bp
-                inv.on_decision(sig["signal"], sig["signal"] != 0, sig["mid"], sig["spread"], FEE_BP)
+                Z.step_with_sizing(sig["s0"], sig["s1"], sig["s2"],
+                                   np.asarray(sig["scaled_mid_ctx"]), np.asarray(sig["dec_mids"]),
+                                   sig["mid"], sig["spread"], FEE_BP, inv, tr,
+                                   {"target_vol": Z.TARGET_VOL, "stop_floor_bp": Z.STOP_FLOOR_BP,
+                                    "cooldown_n": Z.COOLDOWN_N, "decay_mode": Z.DECAY_MODE, "decay_k": Z.DECAY_K})
                 ledger.record(now_b.isoformat(), stream, sig, inv,
                               inv.position - prev_pos, inv.realized_cost_bp - prev_cost)
+                ledger.save_sizing_tracker(stream, tr)
                 orders = position_to_orders(prev_pos, inv.position)
                 if orders:
                     await _apply_orders(ft, ft_pair(sym), orders, sig["mid"], sig["spread"], stake)

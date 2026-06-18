@@ -41,7 +41,8 @@ def _step_sizing(ledger: PaperLedger, exch: str, sym: str, raw_buffer: np.ndarra
     Reuses the SAME signal + gate inputs from generate_from_buffer (SSOT), so the entry
     path is identical to the base book; only sizing + exit differ."""
     from executor.paper import sizing as Z
-    params = params or {"target_vol": Z.TARGET_VOL, "stop_floor_bp": Z.STOP_FLOOR_BP, "cooldown_n": Z.COOLDOWN_N}
+    params = params or {"target_vol": Z.TARGET_VOL, "stop_floor_bp": Z.STOP_FLOOR_BP,
+                        "cooldown_n": Z.COOLDOWN_N, "decay_mode": Z.DECAY_MODE, "decay_k": Z.DECAY_K}
     stream = f"{exch}_{sym}"
     sig = SG.generate_from_buffer(raw_buffer, exch, sym, decision_offset=offset, buckets=buckets)
     if sig.get("reason"):

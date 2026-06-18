@@ -1,7 +1,7 @@
 {
   "trading_mode": "futures",
   "margin_mode": "isolated",
-  "max_open_trades": 2,
+  "max_open_trades": 1,
   "stake_currency": "USDT",
   "stake_amount": "unlimited",
   "tradable_balance_ratio": 0.5,
@@ -12,8 +12,7 @@
     "key": "YOUR_BINANCE_API_KEY",
     "secret": "YOUR_BINANCE_API_SECRET",
     "pair_whitelist": [
-      "BTC/USDT:USDT",
-      "ETH/USDT:USDT"
+      "BTC/USDT:USDT"
     ],
     "pair_blacklist": []
   },
@@ -42,8 +41,10 @@
     "exit": 30,
     "unit": "seconds"
   },
-  "stoploss": -0.1,
-  "minimal_roi": {},
+  "stoploss": -0.99,
+  "minimal_roi": {
+    "0": 10
+  },
   "api_server": {
     "enabled": true,
     "listen_ip_address": "127.0.0.1",
@@ -72,5 +73,7 @@
     "process_throttle_secs": 5
   },
   "strategy": "AAIStrategy",
-  "strategy_path": "strategies/"
+  "strategy_path": "strategies/",
+  "trailing_stop": false,
+  "use_exit_signal": false
 }

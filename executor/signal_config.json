@@ -11,12 +11,28 @@
     "prediction_length": 24,
     "n_features": 219,
     "stake_amount": 100,
-    "exchanges": ["binance_perp"],
-    "pairs": {"BTC-USDT": "BTC/USDT:USDT", "ETH-USDT": "ETH/USDT:USDT"},
+    "exchanges": [
+        "binance_perp"
+    ],
+    "pairs": {
+        "BTC-USDT": "BTC/USDT:USDT"
+    },
     "primary_horizon": "2min",
-    "thresholds": {"30s": 0.54, "1min": 0.54, "2min": 0.54},
-    "horizon_steps": {"30s": 5, "1min": 11, "2min": 23},
-    "freqtrade_api": {"url": "http://127.0.0.1:8080", "username": "aai", "password": "aai_paper_trade"},
+    "thresholds": {
+        "30s": 0.54,
+        "1min": 0.54,
+        "2min": 0.54
+    },
+    "horizon_steps": {
+        "30s": 5,
+        "1min": 11,
+        "2min": 23
+    },
+    "freqtrade_api": {
+        "url": "http://127.0.0.1:8080",
+        "username": "aai",
+        "password": "aai_paper_trade"
+    },
     "tick_interval_seconds": 5,
     "hold_seconds": 120,
     "stale_data_threshold_seconds": 30,

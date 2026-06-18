@@ -19,6 +19,11 @@ TARGET_VOL    = 0.03
 CAP_MAX       = 3
 STOP_FLOOR_BP = 150.0
 COOLDOWN_N    = 2
+# Exit decay mode (tuned 2026-06-18 on BTC recent+OOS windows): debounced decay beats the
+# original "to_flat" — it rides through gate-flicker (retains trend, less churn) but still exits
+# after DECAY_K sustained non-confirms (keeps drawdown ~5-8x below base/hold). Needs WF confirmation.
+DECAY_MODE    = "decay_k"
+DECAY_K       = 3
 
 
 def vol_target_cap(sigma: float, target_vol: float = TARGET_VOL, cap_max: int = CAP_MAX) -> int:
@@ -35,6 +40,7 @@ class PositionTracker:
     cooldown_n: int = COOLDOWN_N
     entry_net: float | None = None
     _cooldown: int = field(default=0, init=False)
+    _quiet: int = field(default=0, init=False)   # consecutive non-confirming decisions (for decay_k debounce)
 
     @property
     def in_cooldown(self) -> bool:
@@ -73,7 +79,17 @@ def step_with_sizing(s0: int, s1: int, s2: int,
 
     g = S.decide_signal(int(s0), int(s1), int(s2), scaled_mid_ctx, mid_decisions)
     cap = vol_target_cap(S.context_vol(scaled_mid_ctx), tv)
-    desired = g * cap if g != 0 else 0
+    mode = params.get("decay_mode", "to_flat")
+    if g != 0:                       # gate confirms a direction: size toward cap (reduces/flips if g opposes p)
+        desired = g * cap
+        tracker._quiet = 0
+    elif mode == "hold":             # ride through gate-flicker; exit only via an OPPOSITE signal or the floor
+        desired = p
+    elif mode == "decay_k":          # debounce: only start decaying after decay_k consecutive non-confirms
+        tracker._quiet += 1
+        desired = 0 if tracker._quiet >= int(params.get("decay_k", 2)) else p
+    else:                            # "to_flat" (default, frozen behavior): decay to flat on any non-confirm
+        desired = 0
     step = int(np.sign(desired - p))
     if step != 0:
         inv.on_decision(step, gated=True, mid=mid, spread=spread, fee_bp=fee_bp)

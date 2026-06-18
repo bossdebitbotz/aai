@@ -36,3 +36,4 @@ executor/checkpoints/
 *.sqlite-shm
 *.sqlite-wal
 executor/training_curves_phase2.png
+executor/user_data/

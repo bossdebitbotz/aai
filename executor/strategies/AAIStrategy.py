@@ -35,16 +35,15 @@ class AAIStrategy(IStrategy):
     # Allow shorting (futures mode)
     can_short = True
 
-    # Emergency stoploss
-    stoploss = -0.10
-
-    # Tight trailing stop — locks in profit, lets winners run
-    trailing_stop = True
-    trailing_stop_positive = 0.001      # trail by 0.1% from peak (tight)
-    trailing_stop_positive_offset = 0.002  # activate once 0.2% profit reached
-    trailing_only_offset_is_reached = True
-
-    minimal_roi = {}  # disabled — exits via trailing stop or signal reversal
+    # ---- ALL exits are owned by the signal service (SSOT vol-target/signal-decay) ----
+    # The old tight trailing-stop + take-profit are DISABLED: they fought the SSOT exit
+    # by closing positions the service intended to hold. Freqtrade is a dumb executor —
+    # it only opens/closes on forced REST calls from the service.
+    stoploss = -0.99                 # effectively OFF; risk is managed by the SSOT exit (sizing.py floor)
+    trailing_stop = False            # DISABLED (was 0.1% trail / 0.2% offset — fought the SSOT exit)
+    use_custom_stoploss = False
+    minimal_roi = {"0": 10}          # DISABLED — 1000% never triggers (no ROI take-profit)
+    use_exit_signal = False          # no strategy-driven exits; only forced exits from the service
 
     # ------------------------------------------------------------------ #
     # No-op indicator / trend methods (signals come from the signal svc) #
