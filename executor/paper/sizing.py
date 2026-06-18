@@ -19,10 +19,11 @@ TARGET_VOL    = 0.03
 CAP_MAX       = 3
 STOP_FLOOR_BP = 150.0
 COOLDOWN_N    = 2
-# Exit decay mode (tuned 2026-06-18 on BTC recent+OOS windows): debounced decay beats the
-# original "to_flat" — it rides through gate-flicker (retains trend, less churn) but still exits
-# after DECAY_K sustained non-confirms (keeps drawdown ~5-8x below base/hold). Needs WF confirmation.
-DECAY_MODE    = "decay_k"
+# Exit decay mode. A 2-window BTC grid favored debounced "decay_k"=3, but an 8-window
+# walk-forward (2026-06-18) did NOT confirm it: to_flat matched/beat decay_k on median net,
+# mean & max drawdown, and head-to-head (k3 > to_flat in only 2/8 windows) — decay_k's edge was
+# window-selection artifact. DEFAULT stays the WF-validated "to_flat"; decay_k kept as a tunable.
+DECAY_MODE    = "to_flat"
 DECAY_K       = 3
 
 
