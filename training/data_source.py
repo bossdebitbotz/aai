@@ -26,7 +26,11 @@ def fetch_parquet_stream(parquet_dir, exchange, symbol, n_levels,
         df = df[mask]
     feature_cols = _build_feature_columns(n_levels)
     feats = df[feature_cols].to_numpy(dtype=np.float64)
-    ts = pd.to_datetime(df["bucket"], utc=True).astype("int64").to_numpy() / 1e6  # unix seconds (us precision)
+    # unix seconds, resolution-robust: pandas datetime64 is ns-backed (astype int64 / 1e6 gave
+    # MILLISECONDS -> 1000x too large -> gap-detection rejected every window). Divide by a
+    # Timedelta so it's correct regardless of ns/us backend.
+    ts = ((pd.to_datetime(df["bucket"], utc=True) - pd.Timestamp("1970-01-01", tz="UTC"))
+          / pd.Timedelta(seconds=1)).to_numpy()
     finite_rows = np.isfinite(feats).all(axis=1)
     feats = feats[finite_rows]
     ts = ts[finite_rows]

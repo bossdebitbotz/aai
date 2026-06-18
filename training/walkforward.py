@@ -66,28 +66,53 @@ def _ctx_for_vol(v: float) -> np.ndarray:
 
 
 def simulate(signs: np.ndarray, mids: np.ndarray, spreads: np.ndarray,
-             vol: np.ndarray, params: dict, fee_bp: float = FEE_BP):
-    """Run the inventory + trailing-stop strategy over one slice of cached
-    per-decision signals. `vol` is the precomputed context_vol per decision
-    (scaled-mid first-diff std). Returns (net_bp_series (N,), n_trades).
+             vol: np.ndarray, params: dict, fee_bp: float = FEE_BP, strategy: str = "trailing"):
+    """Run a strategy over one slice of cached per-decision signals.
+    `vol` is the precomputed context_vol per decision (scaled-mid first-diff std).
+    Returns (net_bp_series (N,), n_trades).
 
-    The vol gate needs a scaled-mid CONTEXT, but we only cached the scalar
-    context_vol per decision; `_ctx_for_vol` rebuilds a 3-point context whose
-    context_vol equals vol[i] exactly."""
+    strategy:
+      - "trailing": inventory + trailing-stop (R.step_with_stop) — the rejected overlay.
+      - "sizing":   the DEPLOYED vol-target/signal-decay exit (Z.step_with_sizing), params
+                    from sizing.py (to_flat default). This is what we trade.
+      - "base":     FROZEN gated inventory, no exit overlay (the de-risk control).
+
+    The vol gate needs a scaled-mid CONTEXT, but we only cached the scalar context_vol per
+    decision; `_ctx_for_vol` rebuilds a 3-point context whose context_vol == vol[i] exactly.
+    Trend/ER gates use the real decision-mid history (mids[:i+1]) — same for every strategy."""
     inv = Inventory()
-    stop = R.TrailingStop(k=params["k"], L=params["L"], cooldown_n=params["cooldown_n"])
     N = len(mids)
     net = np.zeros(N, dtype=np.float64)
     n_trades = 0
+    if strategy == "trailing":
+        stop = R.TrailingStop(k=params["k"], L=params["L"], cooldown_n=params["cooldown_n"])
+    elif strategy == "sizing":
+        from executor.paper import sizing as Z
+        tr = Z.PositionTracker()
+        sp = {"target_vol": Z.TARGET_VOL, "stop_floor_bp": Z.STOP_FLOOR_BP,
+              "cooldown_n": Z.COOLDOWN_N, "decay_mode": Z.DECAY_MODE, "decay_k": Z.DECAY_K}
+    elif strategy == "base":
+        from executor.paper import strategy as S
+    else:
+        raise ValueError(f"unknown strategy {strategy!r}")
     for i in range(N):
         ctx = _ctx_for_vol(float(vol[i]))
         prev_pos = inv.position
-        out = R.step_with_stop(int(signs[i, 0]), int(signs[i, 1]), int(signs[i, 2]),
-                               ctx, mids[: i + 1], float(mids[i]), float(spreads[i]),
-                               fee_bp, inv, stop)
+        s0, s1, s2 = int(signs[i, 0]), int(signs[i, 1]), int(signs[i, 2])
+        if strategy == "trailing":
+            out = R.step_with_stop(s0, s1, s2, ctx, mids[: i + 1], float(mids[i]),
+                                   float(spreads[i]), fee_bp, inv, stop)
+            net[i] = out["net_bp"]
+        elif strategy == "sizing":
+            out = Z.step_with_sizing(s0, s1, s2, ctx, mids[: i + 1], float(mids[i]),
+                                     float(spreads[i]), fee_bp, inv, tr, sp)
+            net[i] = out["net_bp"]
+        else:  # base
+            g = S.decide_signal(s0, s1, s2, ctx, mids[: i + 1])
+            inv.on_decision(g, g != 0, float(mids[i]), float(spreads[i]), fee_bp)
+            net[i] = inv.net_pnl_bp
         if inv.position != prev_pos:
             n_trades += 1
-        net[i] = out["net_bp"]
     return net, n_trades
 
 
@@ -110,16 +135,17 @@ def param_grid(ks=(1.0, 1.5, 2.0, 2.5, 3.0), Ls=(12, 24), cooldowns=(0, 2, 5)) -
     return [dict(k=k, L=L, cooldown_n=c) for k, L, c in itertools.product(ks, Ls, cooldowns)]
 
 
-def sweep(signs, mids, spreads, vol, grid: list[dict], fee_bp: float = FEE_BP):
+def sweep(signs, mids, spreads, vol, grid: list[dict], fee_bp: float = FEE_BP, strategy: str = "trailing"):
     """Evaluate every param set on the (tune) slice. Returns (best_params, table).
-    Objective: net_bp primary, sharpe tie-break (favours flat/robust regions)."""
+    Objective: net_bp primary, sharpe tie-break (favours flat/robust regions).
+    For base/sizing the grid is a single fixed config (nothing to tune)."""
     table = []
     for p in grid:
-        net, n_trades = simulate(signs, mids, spreads, vol, p, fee_bp)
+        net, n_trades = simulate(signs, mids, spreads, vol, p, fee_bp, strategy)
         m = metrics(net, n_trades)
         table.append({**p, **m})
     best_row = max(table, key=lambda r: (r["net_bp"], r["sharpe"]))
-    best = {"k": best_row["k"], "L": best_row["L"], "cooldown_n": best_row["cooldown_n"]}
+    best = {k: best_row[k] for k in ("k", "L", "cooldown_n") if k in best_row}
     return best, table
 
 
@@ -248,15 +274,17 @@ def precompute_signals(run_dir: str, stream: str, start, end, parquet_dir: str =
     from training.model_v2 import CompoundAttentionModelV2
     from training.data_source import fetch_parquet_stream
     from training.dataset import EXCHANGE_MAP, SYMBOL_MAP
+    from training.train_v2 import get_device
     from executor.paper import strategy as S
 
+    device = get_device()                                   # run inference on GPU (was CPU -> ~10x slow on Colab)
     cfg = json.load(open(f"{run_dir}/config.json"))
     ck = torch.load(f"{run_dir}/checkpoints/best.pt", map_location="cpu", weights_only=False)
     pl = ck.get("prediction_length", cfg["prediction_length"])
     model = CompoundAttentionModelV2(n_levels=levels, n_features=cfg["n_features"],
         context_length=cfg["context_length"], prediction_length=pl, d_model=cfg["d_model"],
         n_heads=cfg["n_heads"], n_layers=cfg["n_layers"], d_ff=cfg["d_ff"], dropout=cfg.get("dropout", 0.1))
-    model.load_state_dict(ck["model_state_dict"]); model.eval()
+    model.load_state_dict(ck["model_state_dict"]); model.eval(); model.to(device)
 
     import pickle
     sc = pickle.load(open(f"{run_dir}/scalers.pkl", "rb"))[stream]
@@ -275,10 +303,10 @@ def precompute_signals(run_dir: str, stream: str, start, end, parquet_dir: str =
         for b in range(0, len(didx), batch):
             idx = didx[b:b + batch]
             ctx = np.stack([scaled[t - CTX:t] for t in idx])
-            out = model(torch.from_numpy(ctx).float(),
-                        torch.full((len(idx),), ex_id, dtype=torch.long),
-                        torch.full((len(idx),), sy_id, dtype=torch.long))
-            dl = (out[1] if isinstance(out, (tuple, list)) else out).reshape(-1, 3, 3).numpy()
+            out = model(torch.from_numpy(ctx).float().to(device),
+                        torch.full((len(idx),), ex_id, dtype=torch.long, device=device),
+                        torch.full((len(idx),), sy_id, dtype=torch.long, device=device))
+            dl = (out[1] if isinstance(out, (tuple, list)) else out).reshape(-1, 3, 3).cpu().numpy()
             pred = dl.argmax(2)
             signs[b:b + len(idx)] = np.where(pred == 2, 1, np.where(pred == 0, -1, 0))
     mids = raw[didx, MID_IDX].astype(np.float64)
@@ -294,17 +322,19 @@ STREAMS = ["binance_perp_BTC-USDT", "binance_perp_ETH-USDT",
 
 def run_walkforward(data_start, data_end, out_root: str, parquet_dir: str = "lob_data",
                     train_days: int = 45, test_days: int = 8, tune_days: int = 7,
-                    streams=STREAMS, epochs: int = 50, calibrate: bool = False) -> dict:
-    """Full nested walk-forward. If calibrate=True, runs ONLY fold 0 and reports
-    per-fold train time + best_val_dir_acc (compare to the full-history model
-    before committing to all folds — spec section 5.1 override check)."""
+                    streams=STREAMS, epochs: int = 50, calibrate: bool = False,
+                    strategy: str = "trailing") -> dict:
+    """Full nested walk-forward. strategy in {trailing, sizing, base} selects the overlay
+    (sizing = the DEPLOYED to_flat exit; base = no-exit control). If calibrate=True, runs
+    ONLY fold 0 and reports per-fold train time + best_val_dir_acc (compare to the
+    full-history model before committing to all folds — spec section 5.1 override check)."""
     import time, json
     from pathlib import Path
     folds = make_folds(data_start, data_end, train_days, test_days, tune_days)
     if calibrate:
         folds = folds[:1]
     Path(out_root).mkdir(parents=True, exist_ok=True)
-    grid = param_grid()
+    grid = param_grid() if strategy == "trailing" else [{}]   # base/sizing have nothing to sweep
     fold_results = []
     timings = []
     for fi, fold in enumerate(folds):
@@ -320,9 +350,9 @@ def run_walkforward(data_start, data_end, out_root: str, parquet_dir: str = "lob
             test = precompute_signals(fdir, stream, fold.test_start, fold.test_end, parquet_dir)
             save_signals(f"{fdir}/{stream}_tune.npz", **tune)
             save_signals(f"{fdir}/{stream}_test.npz", **test)
-            best, table = sweep(tune["signs"], tune["mids"], tune["spreads"], tune["vol"], grid)
+            best, table = sweep(tune["signs"], tune["mids"], tune["spreads"], tune["vol"], grid, strategy=strategy)
             chosen[stream] = best
-            net, n_tr = simulate(test["signs"], test["mids"], test["spreads"], test["vol"], best)
+            net, n_tr = simulate(test["signs"], test["mids"], test["spreads"], test["vol"], best, strategy=strategy)
             per_stream_test_nets.append((net, n_tr))
         # portfolio OOS for the fold = sum of per-stream net series (equal weight)
         maxlen = max(len(n) for n, _ in per_stream_test_nets)
@@ -337,6 +367,8 @@ def run_walkforward(data_start, data_end, out_root: str, parquet_dir: str = "lob
     report = aggregate(fold_results)
     report["timings"] = timings
     report["calibrate"] = calibrate
+    report["strategy"] = strategy
+    report["streams"] = list(streams)
     Path(f"{out_root}/report.json").write_text(json.dumps(report, indent=2, default=list))
     return report
 
@@ -350,9 +382,15 @@ if __name__ == "__main__":
     ap.add_argument("--parquet-dir", default="lob_data")
     ap.add_argument("--epochs", type=int, default=50)
     ap.add_argument("--calibrate", action="store_true")
+    ap.add_argument("--strategy", choices=["trailing", "sizing", "base"], default="sizing",
+                    help="sizing = DEPLOYED to_flat exit; base = no-exit control; trailing = rejected overlay")
+    ap.add_argument("--btc-only", action="store_true", help="validate only binance_perp_BTC-USDT")
     a = ap.parse_args()
     ds = dt.datetime.fromisoformat(a.data_start).replace(tzinfo=dt.timezone.utc)
     de = dt.datetime.fromisoformat(a.data_end).replace(tzinfo=dt.timezone.utc)
-    rep = run_walkforward(ds, de, a.out, a.parquet_dir, epochs=a.epochs, calibrate=a.calibrate)
+    streams = ["binance_perp_BTC-USDT"] if a.btc_only else STREAMS
+    rep = run_walkforward(ds, de, a.out, a.parquet_dir, streams=streams,
+                          epochs=a.epochs, calibrate=a.calibrate, strategy=a.strategy)
+    print(f"strategy={a.strategy} streams={streams}")
     print(json.dumps(rep["overall"], indent=2))
     print("timings:", rep["timings"])
