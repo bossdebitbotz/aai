@@ -434,9 +434,13 @@ def build_dataloaders(
             key = f"{exchange}_{symbol}"
             logger.info(f"Fetching data for {key}...")
 
-            features, timestamps = loop.run_until_complete(
-                _fetch_stream_data(config, exchange, symbol, start_time, end_time)
-            )
+            try:
+                features, timestamps = loop.run_until_complete(
+                    _fetch_stream_data(config, exchange, symbol, start_time, end_time)
+                )
+            except FileNotFoundError:
+                logger.warning(f"  {key}: parquet not found, skipping stream.")
+                continue
 
             if len(features) < config.window_size:
                 logger.warning(

@@ -51,8 +51,8 @@ def make_folds(data_start: dt.datetime, data_end: dt.datetime,
 
 
 import numpy as np
-import sys
-sys.path.insert(0, "/Volumes/Docker-SSD/projects/aaiwdbback/aai")
+import sys, os as _os
+sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # repo root (portable: local + Colab)
 from executor.paper.strategy import Inventory
 from executor.paper import risk as R
 
